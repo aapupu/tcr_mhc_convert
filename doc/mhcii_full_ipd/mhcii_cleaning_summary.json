@@ -1,0 +1,115 @@
+{
+  "ambiguous_lookup_keys": [
+    "Mamu-DRB1*07:03",
+    "Patr-DPB1*01:13",
+    "Patr-DRB1*03:07"
+  ],
+  "counts": {
+    "ambiguous_lookup_keys": 3,
+    "ambiguous_lookup_source_records": 6,
+    "model_ready_source_records": 6440,
+    "raw_supported_records": 15549,
+    "safe_lookup_records": 2868
+  },
+  "model_ready_by_family_chain": {
+    "DP_alpha": 680,
+    "DP_beta": 1684,
+    "DQ_alpha": 823,
+    "DQ_beta": 1546,
+    "DR_alpha": 191,
+    "DR_beta": 1516
+  },
+  "model_ready_by_species": {
+    "cattle": 11,
+    "chimpanzee": 86,
+    "gorilla": 24,
+    "horse": 31,
+    "human": 5923,
+    "pig": 103,
+    "rhesus_macaque": 262
+  },
+  "raw_sha256": {
+    "IPD-IMGT-HLA_hla_prot.fasta": "95b0e8752fb8e7411e8db40c87cd2cc369c2aa9ccf054c6e5c52c5eeef311b1e",
+    "IPD-MHC_MHC_prot.fasta": "135a4b6a0ddc09104953ad2ae9f0e1bb7066a8e6a81e162b7126ff4c8ab4a7d3"
+  },
+  "references": {
+    "DP_alpha": {
+      "allele": "HLA-DPA1*01:03:01:01",
+      "end_exclusive": 211,
+      "mature_end": "GLDQPLLKHWEA",
+      "mature_length": 180,
+      "mature_start": "IKADHVSTYAAF",
+      "start_0based": 31
+    },
+    "DP_beta": {
+      "allele": "HLA-DPB1*01:01:01:01",
+      "end_exclusive": 217,
+      "mature_end": "SLDSPVTVEWKA",
+      "mature_length": 188,
+      "mature_start": "RATPENYVYQGR",
+      "start_0based": 29
+    },
+    "DQ_alpha": {
+      "allele": "HLA-DQA1*01:01:01:01",
+      "end_exclusive": 207,
+      "mature_end": "LDQPLLKHWEPE",
+      "mature_length": 184,
+      "mature_start": "EDIVADHVASCG",
+      "start_0based": 23
+    },
+    "DQ_beta": {
+      "allele": "HLA-DQB1*05:01:01:01",
+      "end_exclusive": 223,
+      "mature_end": "LQSPITVEWRAQ",
+      "mature_length": 191,
+      "mature_start": "RDSPEDFVYQFK",
+      "start_0based": 32
+    },
+    "DR_alpha": {
+      "allele": "HLA-DRA*01:01:01:01",
+      "end_exclusive": 207,
+      "mature_end": "DEPLLKHWEFDA",
+      "mature_length": 182,
+      "mature_start": "IKEEHVIIQAEF",
+      "start_0based": 25
+    },
+    "DR_beta": {
+      "allele": "HLA-DRB1*01:01:01:01",
+      "end_exclusive": 220,
+      "mature_end": "VTSPLTVEWRAR",
+      "mature_length": 191,
+      "mature_start": "GDTRPRFLWQLK",
+      "start_0based": 29
+    }
+  },
+  "rejection_reason_counts": {
+    "expression_suffix_N": 645,
+    "expression_suffix_Q": 94,
+    "incomplete_mature_c_terminus": 6094,
+    "incomplete_mature_n_terminus": 8168,
+    "invalid_amino_acid": 701,
+    "low_alignment_identity": 124,
+    "low_reference_coverage": 6260,
+    "reference_c_terminus_not_aligned": 4520,
+    "reference_n_terminus_not_aligned": 8179,
+    "unexpected_mature_length": 8339
+  },
+  "script_version": "1.0",
+  "thresholds": {
+    "excluded_expression_suffixes": [
+      "A",
+      "C",
+      "L",
+      "N",
+      "Q",
+      "S"
+    ],
+    "hydrophobic_window": 19,
+    "maximum_hydrophobic_residues_per_window": 13,
+    "maximum_mature_length_deviation": 5,
+    "maximum_unaligned_reference_c": 3,
+    "maximum_unaligned_reference_n": 2,
+    "minimum_alignment_identity": 0.72,
+    "minimum_reference_coverage": 0.97
+  }
+}

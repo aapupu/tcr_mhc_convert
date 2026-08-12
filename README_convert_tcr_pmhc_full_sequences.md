@@ -139,6 +139,12 @@ alpha/beta 的先后顺序不影响输出；脚本会根据参考表中的链类
 - `C`：MHC-II alpha；
 - `D`：MHC-II beta。
 
+默认的 `doc/mhcii_full_ipd/mhcii_model_input.csv` 已按成熟 MHC-II 结构域重新清理。
+其中 `full_aa` 是去除信号肽、连接肽、跨膜区和胞质尾的可溶性结构预测用核心链，
+不是完整蛋白前体。该表只保留蛋白序列无歧义的名称键；同一二字段名称对应多条
+蛋白序列时不会静默选择第一条，而是从模型输入表排除。完整 QC 规则、来源记录和
+冲突清单见 [`doc/mhcii_full_ipd/README.md`](doc/mhcii_full_ipd/README.md)。
+
 配对时会检查：
 
 - 必须恰好包含一条 alpha 和一条 beta；
