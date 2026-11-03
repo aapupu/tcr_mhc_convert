@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tcrtransform"
+version = "0.1.0"
+description = "Human and mouse TCR sequence reconstruction and CDR region annotation"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [{name = "tcr_mhc_convert contributors"}]
+keywords = ["TCR", "CDR3", "immunoinformatics", "IMGT", "tcrdist"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+
+[project.urls]
+Homepage = "https://github.com/aapupu/tcr_mhc_convert"
+Repository = "https://github.com/aapupu/tcr_mhc_convert"
+Documentation = "https://github.com/aapupu/tcr_mhc_convert/tree/main/TCRtransform"
+
+[project.scripts]
+tcrtransform = "tcrtransform.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+tcrtransform = ["data/*.csv", "data/*.json", "data/*.md", "data/*.tsv"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+

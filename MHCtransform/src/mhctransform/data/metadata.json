@@ -1,0 +1,299 @@
+{
+  "af3_definition": {
+    "definition_id": "af3-soluble-extracellular-v1",
+    "description": "Mature soluble extracellular chain: signal peptide, transmembrane helix and cytoplasmic tail removed; all extracellular folding domains and the membrane-proximal connector retained.",
+    "excluded_expression_suffixes": [
+      "N",
+      "L",
+      "S",
+      "Q",
+      "C",
+      "A"
+    ],
+    "excluded_file": "excluded_af3_sequences.csv",
+    "human_boundary_method": "Reviewed UniProt locus topology projected through the pinned official IPD protein alignment to each exact deposited allele sequence.",
+    "mouse_and_b2m_boundary_method": "Exact accession-specific UniProt topology features.",
+    "official_vs_engineering_note": "AlphaFold 3 specifies separate protein entities but no pMHC-TCR crop. This ectodomain profile is an auditable engineering default.",
+    "pseudo34_is_not_a_structure_chain": true
+  },
+  "completeness_rules": {
+    "human": {
+      "commit": "b2055ea",
+      "method": "Allele_status.txt Partial == Full and protein alphabet contains no X",
+      "release": "3.66.0"
+    },
+    "mouse": {
+      "B2M_min_length": 110,
+      "MHC-II_chain_min_length": 240,
+      "MHC-I_heavy_min_length": 320,
+      "method": "explicit UniProt accession, no Fragment flag, valid alphabet, plus conservative chain-length screen"
+    },
+    "warning": "Complete means the bundled source represents the complete coding protein record. It is not an assertion of cell-surface expression; biologically truncating/null alleles can be complete records."
+  },
+  "counts": {
+    "af3_by_species_class": {
+      "human/I": 11004,
+      "human/II": 2456,
+      "mouse/I": 9,
+      "mouse/II": 14
+    },
+    "af3_excluded_complete": 348,
+    "af3_total": 13483,
+    "full_by_species_class": {
+      "human/I": 20066,
+      "human/II": 9419,
+      "mouse/I": 12,
+      "mouse/II": 17
+    },
+    "full_complete": 13831,
+    "full_total": 29514,
+    "pairs": 8,
+    "pseudo_by_species_class": {
+      "human/I": 2953,
+      "human/II": 5620,
+      "mouse/I": 7,
+      "mouse/II": 8
+    },
+    "pseudo_quarantined": 5,
+    "pseudo_total": 8588
+  },
+  "generated_on": "2026-11-03",
+  "pseudo_definitions": {
+    "netmhciipan-34-v1": {
+      "alpha_mature_reference_positions_1_based": [
+        9,
+        11,
+        22,
+        24,
+        31,
+        52,
+        53,
+        58,
+        59,
+        61,
+        65,
+        66,
+        68,
+        72,
+        73
+      ],
+      "alphabet_note": "X is retained as the source artifact's reference-alignment gap/unknown token; it is not a canonical amino acid.",
+      "beta_mature_reference_positions_1_based": [
+        9,
+        11,
+        13,
+        26,
+        28,
+        30,
+        47,
+        57,
+        67,
+        70,
+        71,
+        74,
+        77,
+        78,
+        81,
+        85,
+        86,
+        89,
+        90
+      ],
+      "chains": [
+        "MHC-II alpha (15)",
+        "MHC-II beta (19)"
+      ],
+      "length": 34,
+      "pairing_note": "DR beta shorthand assumes DRA*01:01. DQ and DP require explicit alpha/beta sequence pairs; artifact presence does not establish biological haplotype evidence."
+    },
+    "netmhcpan-34-v1": {
+      "chains": [
+        "MHC-I heavy"
+      ],
+      "length": 34,
+      "mature_reference_positions_1_based": [
+        7,
+        9,
+        24,
+        45,
+        59,
+        62,
+        63,
+        66,
+        67,
+        69,
+        70,
+        73,
+        74,
+        76,
+        77,
+        80,
+        81,
+        84,
+        95,
+        97,
+        99,
+        114,
+        116,
+        118,
+        143,
+        147,
+        150,
+        152,
+        156,
+        158,
+        159,
+        163,
+        167,
+        171
+      ],
+      "scope_note": "Defined from classical peptide-presenting MHC-I; nonclassical loci/species are extrapolations."
+    }
+  },
+  "quarantine": {
+    "count": 5,
+    "file": "quarantined_pseudosequences.csv",
+    "rule": "Prefer an explicit current colon-delimited artifact name over a conflicting historical alias; for MHC-II also enforce one modal alpha-15 and beta-19 segment per allele. Ties fail the build."
+  },
+  "schema_version": 2,
+  "sequence_kind": "precursor_full (default full lookup); partial_deposited_protein (opt-in); af3-soluble-extracellular-v1 (mature soluble extracellular chain)",
+  "sources": {
+    "af3_human_alignments": {
+      "commit": "b2055ea",
+      "files": {
+        "A_prot.txt": {
+          "sha256": "118ef597265585e1ef75110fef5cf10100b14d36eafdbfdaabc178b53608adde",
+          "url": "https://raw.githubusercontent.com/ANHIG/IMGTHLA/b2055ea/alignments/A_prot.txt"
+        },
+        "B_prot.txt": {
+          "sha256": "c4cda1df2aa0db88b413d1286dafbfc94c1504b9b9721d31b7acf5d6514bb730",
+          "url": "https://raw.githubusercontent.com/ANHIG/IMGTHLA/b2055ea/alignments/B_prot.txt"
+        },
+        "C_prot.txt": {
+          "sha256": "05fc01c4f4cda417fb492c357bce2017fd4382fb08c8f3c286aec50b37b1e0cd",
+          "url": "https://raw.githubusercontent.com/ANHIG/IMGTHLA/b2055ea/alignments/C_prot.txt"
+        },
+        "DPA1_prot.txt": {
+          "sha256": "39e823ef4e8d7a8c637e49fb35573e5f6d419f61cf257d374fcde4a1c74d31c4",
+          "url": "https://raw.githubusercontent.com/ANHIG/IMGTHLA/b2055ea/alignments/DPA1_prot.txt"
+        },
+        "DPB1_prot.txt": {
+          "sha256": "e000aa1b451d68207901fb36b07b5133ee51c7aa447e33a8e9246eb5fdf62b16",
+          "url": "https://raw.githubusercontent.com/ANHIG/IMGTHLA/b2055ea/alignments/DPB1_prot.txt"
+        },
+        "DQA1_prot.txt": {
+          "sha256": "267d61c90799db9c2b1638db1674cc1e0fec579ac40b389ef8f004f97b79ddf1",
+          "url": "https://raw.githubusercontent.com/ANHIG/IMGTHLA/b2055ea/alignments/DQA1_prot.txt"
+        },
+        "DQB1_prot.txt": {
+          "sha256": "9a0e481999b3eedd0ac536fc48b285bfb0215253901d24a88878508ac05edadd",
+          "url": "https://raw.githubusercontent.com/ANHIG/IMGTHLA/b2055ea/alignments/DQB1_prot.txt"
+        },
+        "DRA_prot.txt": {
+          "sha256": "823cb2c183119319b6ca3179a08cd88ae1a920092051347439cf535f4f7882fe",
+          "url": "https://raw.githubusercontent.com/ANHIG/IMGTHLA/b2055ea/alignments/DRA_prot.txt"
+        },
+        "DRB_prot.txt": {
+          "sha256": "bac19ff41e3df3afbbc488525e0344ac272331623127831cedabda326143c113",
+          "url": "https://raw.githubusercontent.com/ANHIG/IMGTHLA/b2055ea/alignments/DRB_prot.txt"
+        },
+        "E_prot.txt": {
+          "sha256": "67d1c859c7c2f06154a76ba886100dd8269ea9db5c43d3bf2faddaf9bce76f18",
+          "url": "https://raw.githubusercontent.com/ANHIG/IMGTHLA/b2055ea/alignments/E_prot.txt"
+        },
+        "F_prot.txt": {
+          "sha256": "ab98c1e5b1be4f9b2cad57833a821e1004d40f2bc4684ccce07d60059fd794ed",
+          "url": "https://raw.githubusercontent.com/ANHIG/IMGTHLA/b2055ea/alignments/F_prot.txt"
+        },
+        "G_prot.txt": {
+          "sha256": "88fbcd2fcd53cdf032bcc69f0bb756761e9fa3a91987537458dd706a7d860ef1",
+          "url": "https://raw.githubusercontent.com/ANHIG/IMGTHLA/b2055ea/alignments/G_prot.txt"
+        }
+      },
+      "name": "IPD-IMGT/HLA 3.66.0 protein alignments"
+    },
+    "af3_topology": {
+      "human_reference_accessions": {
+        "A": "P04439",
+        "B": "P01889",
+        "C": "P10321",
+        "DPA1": "P20036",
+        "DPB1": "P04440",
+        "DQA1": "P01909",
+        "DQB1": "P01920",
+        "DRA": "P01903",
+        "DRB1": "P01911",
+        "DRB3": "P79483",
+        "DRB4": "P13762",
+        "DRB5": "Q30154",
+        "E": "P13747",
+        "F": "P30511",
+        "G": "P17693"
+      },
+      "name": "UniProtKB topology feature batch",
+      "sha256": "e04ec670bb801ce850d941bc760c0092944d89cc3107accb89fd106e8989e3e0",
+      "url": "https://rest.uniprot.org/"
+    },
+    "human_full": {
+      "commit": "b2055ea",
+      "deleted_alleles_sha256": "05c074dd82450399cfcd2577345fcc6e215f84bcaaa6fa155d887267a35f8147",
+      "deleted_alleles_url": "https://raw.githubusercontent.com/ANHIG/IMGTHLA/b2055ea/Deleted_alleles.txt",
+      "legacy_nomenclature_sha256": "c9a527b86b0c4c7ad166e9d06b15c242f6780a0f645825b0c2c65bf29da53fdd",
+      "legacy_nomenclature_url": "https://raw.githubusercontent.com/ANHIG/IMGTHLA/b2055ea/Nomenclature_2009.txt",
+      "name": "IPD-IMGT/HLA 3.66.0 protein records with official sequence status",
+      "sha256": "d5da882fca6427fb9c27fa4c27045ba8246b117a1d367566b4b35fb79bbbbe3a",
+      "status_sha256": "e9cd62585b79f1ff8bd60000cddbe3bba933608ac722637151471b7455a37cff",
+      "status_url": "https://raw.githubusercontent.com/ANHIG/IMGTHLA/b2055ea/Allele_status.txt",
+      "url": "https://www.ebi.ac.uk/ipd/imgt/hla/"
+    },
+    "mouse_and_b2m_full": {
+      "accessions": [
+        "P01887",
+        "P01897",
+        "P01899",
+        "P01900",
+        "P01901",
+        "P01902",
+        "P01904",
+        "P01910",
+        "P01915",
+        "P01921",
+        "P04223",
+        "P04224",
+        "P04227",
+        "P04228",
+        "P04230",
+        "P06342",
+        "P06343",
+        "P06344",
+        "P06345",
+        "P14426",
+        "P14427",
+        "P14428",
+        "P14434",
+        "P14437",
+        "P14438",
+        "P14483",
+        "P61769",
+        "Q31145",
+        "Q31151",
+        "Q31163"
+      ],
+      "name": "UniProtKB accession batch",
+      "sha256": "ab801102d204e11362f236bac1553c3c850dad9abf26e84ad8898ee486d77fa1",
+      "url": "https://rest.uniprot.org/"
+    },
+    "pseudo_i": {
+      "commit": "eddf17d972285a89e80e2837adc1ee6308f5b96b",
+      "name": "PUFFIN MHC_pseudo.dat",
+      "sha256": "6e24bdcc5105706a0e9edf69f1cbb5515858b89bd44b6015257a9b68f18567d8",
+      "url": "https://raw.githubusercontent.com/gifford-lab/PUFFIN/eddf17d972285a89e80e2837adc1ee6308f5b96b/data/MHC_pseudo.dat"
+    },
+    "pseudo_ii": {
+      "commit": "eddf17d972285a89e80e2837adc1ee6308f5b96b",
+      "name": "PUFFIN pseudosequence.2016.all.X.dat",
+      "sha256": "f793203d82b9467ada2943803f8d9f34942494d980001378e106203757dfd5e9",
+      "url": "https://raw.githubusercontent.com/gifford-lab/PUFFIN/eddf17d972285a89e80e2837adc1ee6308f5b96b/data/pseudosequence.2016.all.X.dat"
+    }
+  }
+}

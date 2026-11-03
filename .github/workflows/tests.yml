@@ -1,0 +1,35 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.11"]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install both packages
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ./MHCtransform -e ./TCRtransform
+      - name: Test MHCtransform
+        run: python -m unittest discover -s MHCtransform/tests -p 'test*.py' -v
+      - name: Test TCRtransform
+        run: python -m unittest discover -s TCRtransform/tests -p 'test*.py' -v
+      - name: CLI smoke tests
+        run: |
+          mhctransform allele-to-af3 'HLA-A*02:01' --class I > /tmp/mhctransform.json
+          tcrtransform --help > /tmp/tcrtransform-help.txt

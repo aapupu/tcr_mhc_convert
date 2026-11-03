@@ -1,0 +1,9 @@
+canonical_name,aliases,species,mhc_class,alpha_or_heavy,beta_or_companion,source
+H-2-IAb,H2-IAb,mouse,II,H2-Aa*b,H2-Ab1*b,IMGT mouse MHC nomenclature; chains mapped to explicit UniProt accessions
+H-2-IAd,H2-IAd,mouse,II,H2-Aa*d,H2-Ab1*d,IMGT mouse MHC nomenclature; chains mapped to explicit UniProt accessions
+H-2-IAk,H2-IAk,mouse,II,H2-Aa*k,H2-Ab1*k,IMGT mouse MHC nomenclature; chains mapped to explicit UniProt accessions
+H-2-IAq,H2-IAq,mouse,II,H2-Aa*q,H2-Ab1*q,IMGT mouse MHC nomenclature; chains mapped to explicit UniProt accessions
+H-2-IAs,H2-IAs,mouse,II,H2-Aa*s,H2-Ab1*s,IMGT mouse MHC nomenclature; chains mapped to explicit UniProt accessions
+H-2-IAu,H2-IAu,mouse,II,H2-Aa*u,H2-Ab1*u,IMGT mouse MHC nomenclature; chains mapped to explicit UniProt accessions
+H-2-IEd,H2-IEd,mouse,II,H2-Ea*d,H2-Eb1*d,IMGT mouse MHC nomenclature; chains mapped to explicit UniProt accessions
+H-2-IEk,H2-IEk,mouse,II,H2-Ea*k,H2-Eb1*k,IMGT mouse MHC nomenclature; chains mapped to explicit UniProt accessions
