@@ -211,5 +211,5 @@ TCRtransform/
 └── tests/
 ```
 
-本目录尚未替项目代码选择开源许可证。公开发布到 GitHub 前，仓库所有者应增加明确的代码许可证，并确认 IMGT/tcrdist 派生参考数据的再分发条件。
+本包代码采用 [MIT License](LICENSE)。捆绑及派生的参考数据仍保留上游署名和适用条款；MIT 许可证不会重新许可 IMGT/tcrdist 派生数据。
 

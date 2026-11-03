@@ -1,8 +1,9 @@
 # Data provenance and terms
 
-No open-source code license has been selected for this directory. Bundled
-biological reference records retain their original source attribution and
-applicable terms; any future code license will not relicense those records.
+The source code in this directory is licensed under the MIT License; see
+`LICENSE`. Bundled biological reference records retain their original source
+attribution and applicable terms. The MIT License does not relicense those
+records.
 
 - Human HLA deposited proteins and sequence-status metadata: pinned
   IPD-IMGT/HLA 3.66.0, IMGTHLA commit `b2055ea`. See

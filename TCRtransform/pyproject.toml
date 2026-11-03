@@ -7,10 +7,12 @@ name = "tcrtransform"
 version = "0.1.0"
 description = "Human and mouse TCR sequence reconstruction and CDR region annotation"
 readme = "README.md"
+license = {file = "LICENSE"}
 requires-python = ">=3.9"
 authors = [{name = "tcr_mhc_convert contributors"}]
 keywords = ["TCR", "CDR3", "immunoinformatics", "IMGT", "tcrdist"]
 classifiers = [
+  "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
   "Topic :: Scientific/Engineering :: Bio-Informatics",

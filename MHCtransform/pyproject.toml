@@ -7,9 +7,16 @@ name = "mhctransform"
 version = "0.2.0"
 description = "Auditable human/mouse MHC full, AF3 extracellular-chain and 34-aa pseudosequence lookup"
 readme = "README.md"
+license = {file = "LICENSE"}
 requires-python = ">=3.9"
 authors = [{name = "tcr_mhc_convert contributors"}]
 dependencies = []
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
 
 [project.urls]
 Homepage = "https://github.com/aapupu/tcr_mhc_convert"

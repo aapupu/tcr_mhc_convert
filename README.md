@@ -1,19 +1,21 @@
 # tcr_mhc_convert
 
-`tcr_mhc_convert` is an auditable, offline-capable Python monorepo for converting human and mouse MHC and alpha/beta TCR annotations into protein sequences and back where the mapping is exact.
+**English** | [简体中文](README.zh-CN.md)
 
-中文说明为主；两个子项目也各自保留完整的英文/中文文档和数据来源记录。本仓库由原 `aapupu/tcr_design` 重命名而来。
+`tcr_mhc_convert` is an auditable, offline-capable Python monorepo for converting human and mouse MHC and alpha/beta TCR annotations into protein sequences, with exact reverse lookup where the mapping permits it.
 
-## 两个独立工具
+This repository was renamed from `aapupu/tcr_design`.
 
-| 工具 | 主要功能 | 命令行 |
+## Packages
+
+| Package | Main capabilities | CLI |
 |---|---|---|
-| [`MHCtransform`](MHCtransform/) | 人/鼠 MHC-I、MHC-II 的 allele/name 与前体全长、AF3 胞外链、34-aa pseudosequence 双向精确转换；MHC-I 自动配物种匹配 B2M，MHC-II 输出 alpha/beta 双链 | `mhctransform` |
-| [`TCRtransform`](TCRtransform/) | 人/鼠 alpha/beta TCR 的 V + CDR3 + J + C 胞外链重建、CDR1/2/2.5/3 注释、CDR3 边界解析和完整链反查 | `tcrtransform` |
+| [`MHCtransform`](MHCtransform/) | Exact bidirectional conversion between human/mouse MHC-I or MHC-II allele names and precursor proteins, AF3-ready extracellular chains, or 34-aa pseudosequences; species-matched B2M for MHC-I and separate alpha/beta chains for MHC-II | `mhctransform` |
+| [`TCRtransform`](TCRtransform/) | Human/mouse alpha/beta TCR extracellular-chain reconstruction from V + CDR3 + J + C, CDR1/2/2.5/3 annotation, CDR3 boundary analysis, and reverse parsing of complete extracellular chains | `tcrtransform` |
 
-两个包运行时都只依赖 Python 标准库，支持 Python 3.9 及以上版本。它们共享一个 GitHub 仓库，但保留独立的 Python 包名、版本、API 和命令行，因此可以单独或一起安装。
+Both packages use only the Python standard library at runtime and support Python 3.9 or newer. They share one GitHub repository while retaining independent package names, versions, APIs, and command-line programs, so they can be installed separately or together.
 
-## 安装
+## Installation
 
 ```bash
 git clone https://github.com/aapupu/tcr_mhc_convert.git
@@ -24,9 +26,9 @@ source .venv/bin/activate
 python -m pip install -e ./MHCtransform -e ./TCRtransform
 ```
 
-## 快速示例
+## Quick start
 
-### MHC allele -> 前体全长、AF3 链或 34-aa pseudo
+### MHC allele to precursor, AF3 chain, or 34-aa pseudo
 
 ```bash
 # HLA-A heavy-chain precursor
@@ -44,11 +46,11 @@ mhctransform allele-to-pseudo 'HLA-A*02:01' \
   --class I --definition netmhcpan-34-v1
 ```
 
-反向查询使用 `full-to-allele`、`af3-to-allele` 和 `pseudo-to-allele`。反查会保留全部完全匹配候选，不会把多对一映射伪装成唯一等位基因。详细定义、覆盖范围和审核结论见 [`MHCtransform/README.md`](MHCtransform/README.md) 与 [`MHCtransform/AUDIT_REPORT.md`](MHCtransform/AUDIT_REPORT.md)。
+Use `full-to-allele`, `af3-to-allele`, and `pseudo-to-allele` for reverse lookup. Reverse queries retain every exact candidate and never present a many-to-one mapping as a unique allele. See the [`MHCtransform` documentation](MHCtransform/README.md) and [audit report](MHCtransform/AUDIT_REPORT.md) for definitions, coverage, limitations, and provenance.
 
-### TCR V/J/CDR3 -> AF3-ready alpha/beta 胞外链
+### TCR V/J/CDR3 to AF3-ready alpha/beta extracellular chains
 
-准备至少含有 `TRAV, TRAJ, CDR3A, TRBV, TRBJ, CDR3B` 的 CSV：
+Prepare a CSV containing at least `TRAV, TRAJ, CDR3A, TRBV, TRBJ, CDR3B`:
 
 ```bash
 tcrtransform build TCRtransform/examples/tcr_input.csv \
@@ -56,23 +58,23 @@ tcrtransform build TCRtransform/examples/tcr_input.csv \
   -o tcr_built.csv
 ```
 
-只注释 CDR 区域可用 `tcrtransform annotate`；从已有完整胞外链反查 V/J/C 和 CDR 可用 `tcrtransform parse`。详细说明见 [`TCRtransform/README.zh-CN.md`](TCRtransform/README.zh-CN.md)，对照 Stitchr/tcrdist3 的验证见 [`TCRtransform/validation/REPORT.md`](TCRtransform/validation/REPORT.md)。
+Use `tcrtransform annotate` to annotate CDR regions without reconstruction, or `tcrtransform parse` to infer V/J/C genes and CDRs from existing extracellular chains. See the [`TCRtransform` documentation](TCRtransform/README.md) and its [Stitchr/tcrdist3 comparative validation](TCRtransform/validation/REPORT.md).
 
-## AlphaFold 3 的 pMHC-TCR 五链输入
+## AlphaFold 3 pMHC-TCR five-chain input
 
-建议把每条分子作为独立 protein entity 输入，不拼接 linker，也不要把 34-aa pseudo 当作结构链：
+Provide each molecule as an independent protein entity. Do not join chains with artificial linkers, and never use a non-contiguous 34-aa pseudosequence as a structural chain.
 
-| AF3 entity | MHC-I | MHC-II |
+| AF3 entity | MHC-I complex | MHC-II complex |
 |---|---|---|
-| 1 | peptide | peptide |
-| 2 | MHC heavy-chain 胞外域 | MHC alpha-chain 胞外域 |
-| 3 | B2M | MHC beta-chain 胞外域 |
-| 4 | TCR alpha 成熟 V+C 胞外链 | TCR alpha 成熟 V+C 胞外链 |
-| 5 | TCR beta 成熟 V+C 胞外链 | TCR beta 成熟 V+C 胞外链 |
+| 1 | Peptide | Peptide |
+| 2 | MHC heavy-chain extracellular region | MHC alpha-chain extracellular region |
+| 3 | B2M | MHC beta-chain extracellular region |
+| 4 | Mature TCR alpha V+C extracellular chain | Mature TCR alpha V+C extracellular chain |
+| 5 | Mature TCR beta V+C extracellular chain | Mature TCR beta V+C extracellular chain |
 
-`MHCtransform` 的 `af3-soluble-extracellular-v1` 会移除 signal peptide、跨膜区和胞内尾，保留全部胞外折叠域及膜近端连接区；`TCRtransform` 输出成熟的 TCR V+C 胞外结构链。AF3 官方输入格式只要求分别提供各条氨基酸链，并未规定统一裁剪坐标；上述范围是本仓库经过来源核对和测试的工程 profile。
+The MHC profile `af3-soluble-extracellular-v1` removes the signal peptide, transmembrane helix, and cytoplasmic tail while retaining all extracellular folded domains and the membrane-proximal connector. `TCRtransform` produces mature TCR V+C extracellular structural chains. AlphaFold 3 specifies that these amino-acid chains should be supplied as separate entities but does not prescribe universal crop coordinates; these retained regions are the repository's audited engineering profile.
 
-## 测试
+## Tests
 
 ```bash
 PYTHONPATH=MHCtransform/src:TCRtransform/src \
@@ -82,19 +84,21 @@ PYTHONPATH=MHCtransform/src:TCRtransform/src \
   python -m unittest discover -s TCRtransform/tests -p 'test*.py' -v
 ```
 
-根目录的 [GitHub Actions workflow](.github/workflows/tests.yml) 会在 Python 3.9 和 3.11 上安装并测试两个包。
+The root [GitHub Actions workflow](.github/workflows/tests.yml) installs and tests both packages on Python 3.9 and 3.11.
 
-## 仓库结构
+## Repository layout
 
 ```text
 tcr_mhc_convert/
-|-- MHCtransform/          # mhctransform package, data, audit and tests
-|-- TCRtransform/          # tcrtransform package, validation and tests
+|-- MHCtransform/          # mhctransform package, data, audit, and tests
+|-- TCRtransform/          # tcrtransform package, validation, and tests
 |-- legacy/tcr_design_v1/ # predecessor files retained for provenance
 |-- .github/workflows/     # combined continuous integration
-`-- README.md
+|-- LICENSE                # MIT code license
+|-- README.zh-CN.md        # optional Chinese documentation
+`-- README.md              # default English documentation
 ```
 
-## 数据来源与许可边界
+## License and data terms
 
-每个子项目的 `NOTICE.md` 和数据目录元数据记录了 IPD-IMGT/HLA、UniProt、tcrdist3、PUFFIN 等上游来源、固定版本和校验值。仓库目前没有为新代码选择开源许可证；公开可见不等同于授予开源使用权，上游生物数据库条款也不会被未来的代码许可证覆盖。
+Repository code is licensed under the [MIT License](LICENSE). Each package's `NOTICE.md` and data metadata record the pinned versions, checksums, and provenance of upstream resources including IPD-IMGT/HLA, UniProt, tcrdist3, and PUFFIN. The MIT License applies to repository code; it does not relicense bundled or derived biological reference data. Review the applicable upstream terms before redistributing those data.

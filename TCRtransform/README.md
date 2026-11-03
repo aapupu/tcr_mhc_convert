@@ -211,5 +211,5 @@ TCRtransform/
 `-- tests/
 ```
 
-No open-source license has been selected for the package code in this directory. Before public release, the repository owner should add an explicit code license and confirm the redistribution conditions for the IMGT/tcrdist-derived reference data.
+The package code is licensed under the [MIT License](LICENSE). Bundled and derived reference data retain their upstream attribution and applicable terms; the MIT License does not relicense IMGT/tcrdist-derived data.
 

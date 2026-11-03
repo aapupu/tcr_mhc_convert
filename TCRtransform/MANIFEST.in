@@ -1,6 +1,7 @@
 include README.md
 include README.zh-CN.md
 include NOTICE.md
+include LICENSE
 recursive-include src/tcrtransform/data *.csv *.json *.md *.tsv
 recursive-include examples *.csv
 recursive-include validation *.csv *.json *.md

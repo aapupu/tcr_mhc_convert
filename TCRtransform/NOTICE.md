@@ -23,5 +23,5 @@ The underlying germline annotations originate from IMGT. Academic use should cit
 - Heather JM et al. Stitchr: stitching coding TCR nucleotide sequences from V/J/CDR3 information. *Nucleic Acids Research*. 2022;50(12):e68. <https://doi.org/10.1093/nar/gkac190>
 - IMGT FR-IMGT and CDR-IMGT definitions: <https://www.imgt.org/IMGTScientificChart/Nomenclature/IMGT-FRCDRdefinition.html>
 
-No license for the new package code has been selected in this folder. Add one before public release. A code license does not override upstream database terms.
+The package code is licensed under the MIT License; see `LICENSE`. The MIT License does not override or relicense upstream database content, and users should confirm the applicable terms before redistributing derived reference data.
 
