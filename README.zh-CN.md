@@ -46,7 +46,7 @@ mhctransform allele-to-pseudo 'HLA-A*02:01' \
   --class I --definition netmhcpan-34-v1
 ```
 
-反向查询使用 `full-to-allele`、`af3-to-allele` 和 `pseudo-to-allele`。反查会保留全部完全匹配候选，不会把多对一映射伪装成唯一等位基因。详细定义、覆盖范围和审核结论见 [`MHCtransform/README.md`](MHCtransform/README.md) 与 [`MHCtransform/AUDIT_REPORT.md`](MHCtransform/AUDIT_REPORT.md)。
+反向查询使用 `full-to-allele`、`af3-to-allele` 和 `pseudo-to-allele`。反查会保留全部完全匹配候选，不会把多对一映射伪装成唯一等位基因。详细定义、覆盖范围和审核结论见 [`MHCtransform/README.zh-CN.md`](MHCtransform/README.zh-CN.md) 与 [`MHCtransform/AUDIT_REPORT.md`](MHCtransform/AUDIT_REPORT.md)。
 
 ### TCR V/J/CDR3 -> 适合 AF3 的 alpha/beta 胞外链
 

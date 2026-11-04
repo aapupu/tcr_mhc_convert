@@ -1,3 +1,6 @@
 recursive-include src/mhctransform/data *.csv *.json
+include README.md
+include README.zh-CN.md
+include NOTICE.md
 include LICENSE
 

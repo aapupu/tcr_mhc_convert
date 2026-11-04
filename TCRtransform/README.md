@@ -1,6 +1,6 @@
 # TCRtransform
 
-**English** | [Simplified Chinese](README.zh-CN.md)
+**English** | [简体中文](README.zh-CN.md)
 
 `TCRtransform` is part of the [`aapupu/tcr_mhc_convert`](https://github.com/aapupu/tcr_mhc_convert) monorepo.
 
@@ -197,6 +197,7 @@ TCRtransform/
 |-- README.md
 |-- README.zh-CN.md
 |-- NOTICE.md
+|-- LICENSE
 |-- examples/
 |-- validation/
 |-- tools/
@@ -211,5 +212,6 @@ TCRtransform/
 `-- tests/
 ```
 
-The package code is licensed under the [MIT License](LICENSE). Bundled and derived reference data retain their upstream attribution and applicable terms; the MIT License does not relicense IMGT/tcrdist-derived data.
+## License and data terms
 
+The package code is licensed under the [MIT License](LICENSE). Bundled and derived reference data retain their upstream attribution and applicable terms; the MIT License does not relicense IMGT/tcrdist-derived data.

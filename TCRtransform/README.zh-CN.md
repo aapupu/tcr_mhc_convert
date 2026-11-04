@@ -197,6 +197,7 @@ TCRtransform/
 ├── README.md
 ├── README.zh-CN.md
 ├── NOTICE.md
+├── LICENSE
 ├── examples/
 ├── validation/
 ├── tools/
@@ -211,5 +212,6 @@ TCRtransform/
 └── tests/
 ```
 
-本包代码采用 [MIT License](LICENSE)。捆绑及派生的参考数据仍保留上游署名和适用条款；MIT 许可证不会重新许可 IMGT/tcrdist 派生数据。
+## 许可证与数据条款
 
+本包代码采用 [MIT License](LICENSE)。捆绑及派生的参考数据仍保留上游署名和适用条款；MIT 许可证不会重新许可 IMGT/tcrdist 派生数据。
