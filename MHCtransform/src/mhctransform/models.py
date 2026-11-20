@@ -36,6 +36,11 @@ class PseudoCandidate:
     beta_allele: str
     source: str
     source_version: str
+    evidence_level: str
+    official_support: bool
+    validation_status: str
+    source_record_ids: Tuple[str, ...]
+    quality_flags: Tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -49,6 +54,35 @@ class AF3SequenceCandidate:
     locus: str
     definition_id: str
     sequence: str
+    source_full_record_id: str
+    precursor_start_1based: int
+    precursor_end_1based: int
+    boundary_method: str
+    boundary_source: str
+    source_accession: str
+
+
+@dataclass(frozen=True)
+class PBRSequenceCandidate:
+    """A contiguous peptide-binding structural domain selection.
+
+    MHC-I contains the heavy-chain alpha1+alpha2 domains. MHC-II uses one
+    candidate for alpha1 and another for beta1; these chains are never
+    concatenated.
+    """
+
+    record_id: str
+    allele: str
+    aliases: Tuple[str, ...]
+    species: str
+    mhc_class: str
+    chain_role: str
+    locus: str
+    definition_id: str
+    sequence: str
+    source_af3_record_id: str
+    af3_start_1based: int
+    af3_end_1based: int
     source_full_record_id: str
     precursor_start_1based: int
     precursor_end_1based: int
@@ -117,6 +151,36 @@ class FallbackAF3SequenceCandidate:
 
 
 @dataclass(frozen=True)
+class FallbackPBRSequenceCandidate:
+    """A PBR cropped from an exact or engineered AF3 fallback chain."""
+
+    record_id: str
+    allele: str
+    aliases: Tuple[str, ...]
+    species: str
+    mhc_class: str
+    chain_role: str
+    locus: str
+    definition_id: str
+    sequence: str
+    source_af3_record_id: str
+    af3_start_1based: int
+    af3_end_1based: int
+    evidence_level: str
+    observed_spans_1based: str
+    imputed_spans_1based: str
+    observed_residue_count: int
+    imputed_residue_count: int
+    source_record_ids: Tuple[str, ...]
+    template_record_id: str
+    template_allele: str
+    target_pseudo_record_id: str
+    pseudo_distance: int
+    unknown_pseudo_positions: Tuple[int, ...]
+    quality_flags: Tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class MoleculeCandidate:
     canonical_name: str
     species: str
@@ -130,6 +194,14 @@ class AF3MoleculeCandidate:
     species: str
     mhc_class: str
     chains: Tuple[AF3SequenceCandidate | FallbackAF3SequenceCandidate, ...]
+
+
+@dataclass(frozen=True)
+class PBRMoleculeCandidate:
+    canonical_name: str
+    species: str
+    mhc_class: str
+    chains: Tuple[PBRSequenceCandidate | FallbackPBRSequenceCandidate, ...]
 
 
 @dataclass(frozen=True)

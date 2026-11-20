@@ -78,7 +78,7 @@ def fallback_metadata_fields() -> Dict[str, object]:
     """Return the shared schema fragment for strict and standalone builders."""
 
     return {
-        "schema_version": 3,
+        "schema_version": 4,
         "sequence_kind": (
             "precursor_full (strict default); partial_deposited_protein (legacy opt-in); "
             f"{AF3_DEFINITION} (strict mature extracellular chain); source-partial-v1; "
@@ -478,6 +478,61 @@ def build_fallback_files(data_dir: Path) -> Mapping[str, int]:
         valid_catalog[group] = tuple(valid_entries)
     catalog = valid_catalog
 
+    # Thousands of allele names collapse to far fewer (first-field,
+    # pseudosegment) template-selection problems.  Cache both the same-family
+    # candidate pool and its deterministic nearest template; otherwise every
+    # rare allele rescans an entire HLA locus and fallback rebuilding becomes
+    # unnecessarily quadratic.
+    template_pool_cache: Dict[
+        Tuple[str, str, str, str, str], Tuple[Tuple[object, str], ...]
+    ] = {}
+    template_choice_cache: Dict[
+        Tuple[str, str, str, str, str, str], Tuple[object, str, int]
+    ] = {}
+
+    def choose_template_cached(
+        target: Mapping[str, object],
+    ) -> Tuple[object, str, int]:
+        group = (
+            str(target["species"]),
+            str(target["mhc_class"]),
+            str(target["chain_role"]),
+            str(target["locus"]),
+        )
+        target_first = first_field(str(target["allele"]))
+        pool_key = (*group, target_first)
+        if pool_key not in template_pool_cache:
+            all_candidates = catalog.get(group, ())
+            same_first = tuple(
+                item
+                for item in all_candidates
+                if target_first and first_field(item[0].allele) == target_first
+            )
+            template_pool_cache[pool_key] = same_first or all_candidates
+        target_segment = str(target["pseudo_segment"])
+        choice_key = (*pool_key, target_segment)
+        if choice_key not in template_choice_cache:
+            candidates = template_pool_cache[pool_key]
+            if not candidates:
+                raise ValueError(f"no same-locus AF3 template for {target['allele']}")
+            ranked = [
+                (
+                    hamming_distance(target_segment, segment),
+                    candidate.allele,
+                    candidate.record_id,
+                    candidate,
+                    segment,
+                )
+                for candidate, segment in candidates
+            ]
+            selected = min(ranked)
+            template_choice_cache[choice_key] = (
+                selected[3],
+                selected[4],
+                selected[0],
+            )
+        return template_choice_cache[choice_key]
+
     fallback_full: List[Dict[str, object]] = []
     fallback_af3: List[Dict[str, object]] = []
     curated_af3: Dict[str, Tuple[str, int]] = {"P14437": (EXACT_ECTODOMAIN_EVIDENCE, 195)}
@@ -568,9 +623,7 @@ def build_fallback_files(data_dir: Path) -> Mapping[str, int]:
             # precursor (notably signal-free mature mouse H2-Aa*s/P14437).
             # Preserve that exact ectodomain and add only the missing precursor
             # context from a full-capable same-locus template.
-            template, _template_segment, pseudo_distance = _choose_template(
-                target, catalog
-            )
+            template, _template_segment, pseudo_distance = choose_template_cached(target)
             template_full = full_by_id.get(template.source_full_record_id)
             if template_full is None or not template_full.is_complete:
                 raise ValueError(
@@ -643,7 +696,7 @@ def build_fallback_files(data_dir: Path) -> Mapping[str, int]:
                 )
             continue
 
-        template, template_segment, pseudo_distance = _choose_template(target, catalog)
+        template, template_segment, pseudo_distance = choose_template_cached(target)
         contact_positions = contact_cache[template.record_id]
         template_full = full_by_id.get(template.source_full_record_id)
         if template_full is None or not template_full.is_complete:
@@ -771,9 +824,16 @@ def build_fallback_files(data_dir: Path) -> Mapping[str, int]:
     af3_unique = {str(row["record_id"]): row for row in fallback_af3}
     _write_csv(data_dir / "fallback_full_sequences.csv", tuple(full_unique.values()))
     _write_csv(data_dir / "fallback_af3_sequences.csv", tuple(af3_unique.values()))
+    # PBR fallback rows are a provenance-preserving crop of these finalized
+    # AF3 rows, so they must be rebuilt only after fallback_af3_sequences.csv
+    # has been written.
+    from build_pbr_reference import build_fallback_pbr_file
+
+    fallback_pbr_count = build_fallback_pbr_file(data_dir)
     return {
         "fallback_full": len(full_unique),
         "fallback_af3": len(af3_unique),
+        "fallback_pbr": fallback_pbr_count,
         "component_targets": len(targets),
     }
 

@@ -10,6 +10,7 @@
 - MHC-II alpha/beta chains;
 - deposited IPD/UniProt proteins, with records confirmed by official `Full` status or explicit UniProt completeness checks labeled `precursor_full`;
 - mature soluble extracellular chains for AF3 complex input under `af3-soluble-extracellular-v1`;
+- contiguous peptide-binding regions: MHC-I alpha1+alpha2 as one chain, or MHC-II alpha1 and beta1 as two separate chains;
 - explicit partial, partial-guided imputed, and pseudo-only scaffold fallbacks without mixing them into the strict registry;
 - two strictly separated 34-aa pseudosequence definitions;
 - bidirectional lookup: strict sequences return **all exact candidates**, while explicitly included fallback constructs return `compatible_*` candidates.
@@ -25,12 +26,15 @@ It does not guess a unique allele from a pseudosequence, and it does not call a 
 | `source-partial-v1` | Exact deposited fragment; never relabeled as a full precursor | Evidence recovery and partial-sequence inspection |
 | `precursor-imputed-v1` | Synthetic complete-length scaffold retaining aligned deposited residues and all non-`X` target pseudo residues; the remainder comes from a same-species, same-locus template | Explicit opt-in construct design, not an official allele sequence |
 | `af3-soluble-extracellular-imputed-v1` | AF3-length construct under the same residue-level provenance rules | Explicit opt-in AF3 screening when no exact chain exists |
+| `mhci-alpha1-alpha2-v1` | Contiguous MHC-I alpha1+alpha2 peptide-binding groove; normally 182 aa; excludes alpha3 and B2M | Domain comparison and auditable extraction/checking of the 34 contact positions |
+| `mhcii-alpha1-v1` | Contiguous MHC-II alpha1 peptide-binding domain | First of two separate MHC-II PBR chains |
+| `mhcii-beta1-v1` | Contiguous MHC-II beta1 peptide-binding domain | Second of two separate MHC-II PBR chains |
 | `netmhcpan-34-v1` | 34 peptide-contact positions on a mature MHC-I heavy-chain reference alignment; excludes B2M | Pan-allele model descriptor, not a structural chain |
 | `netmhciipan-34-v1` | 15 MHC-II alpha-chain positions plus 19 beta-chain positions concatenated from reference alignments; `X` is allowed | Pan-allele model descriptor, not a structural chain |
 
-Position definitions and source hashes are stored in [`metadata.json`](src/mhctransform/data/metadata.json). MHC-II pseudosequences cannot be cut with one universal set of precursor indices because signal-peptide lengths and alignment indels vary. The runtime therefore uses a versioned published pseudosequence artifact instead of slicing full chains on demand.
+PBR and pseudo are complementary but not interchangeable. A PBR is a contiguous foldable structural domain and contains every pseudo contact site; a 34mer is a non-contiguous model descriptor. The shorter PBR is useful for comparison and pseudo verification, but the complete extracellular chain remains the default AF3 pMHC-TCR input because it retains the membrane-proximal domains and their native interfaces.
 
-Fallback is cumulative and disabled by default: `none` → `partial` → `imputed` → `pseudo-scaffold`. A 34mer is not invertible: 2,953 human MHC-I names collapse to 1,574 unique pseudos, while 5,620 human MHC-II names collapse to 1,160. Imputed outputs are therefore compatible structural scaffolds, not recovered biological full sequences.
+Position definitions and source hashes are stored in [`metadata.json`](src/mhctransform/data/metadata.json). MHC-II pseudo positions are calibrated alignment columns rather than universal precursor indices. Fallback is cumulative and disabled by default: `none` → `partial` → `imputed` → `pseudo-scaffold`. A 34mer remains many-to-many: 15,478 human MHC-I names currently collapse to 4,279 unique pseudos, while 8,948 human MHC-II molecule names collapse to 1,695. Imputed outputs are therefore compatible structural scaffolds, not recovered biological full sequences.
 
 ## Current local registry
 
@@ -39,33 +43,22 @@ Fallback is cumulative and disabled by default: `none` → `partial` → `impute
 | Deposited protein records | 20,066 | 9,419 | 12 | 17 |
 | Complete precursor records available by default | 11,283 | 2,525 | 9 | 14 |
 | Strict AF3-ready extracellular-chain records | 11,004 | 2,456 | 9 | 15 |
-| 34-aa records | 2,953 | 5,620 | 7 | 8 |
+| Strict PBR chain records | 11,003 | 2,456 | 8 | 15 |
+| 34-aa records | 15,478 | 8,948 | 10 | 8 |
 
-Human HLA records come from pinned IPD-IMGT/HLA 3.66.0 at commit `b2055ea` and are evaluated together with the official `Full/Partial` status in the matching `Allele_status.txt`. Mouse MHC and human/mouse B2M records come from explicit UniProt accessions. AF3 boundaries are projected from reviewed UniProt topology onto the matching IPD protein alignments, and every output is verified as a contiguous subsequence of its parent precursor. The scientific 34-aa definitions come from the NetMHCpan/NetMHCIIpan literature; the distributed local artifact uses the public PUFFIN secondary mirror. Full source accessions, SHA-256 hashes, and generation dates are recorded in the metadata.
+Human HLA records come from pinned IPD-IMGT/HLA 3.66.0 at commit `b2055ea` and are evaluated with the matching official `Full/Partial` status. Mouse MHC and human/mouse B2M records come from explicit UniProt accessions. AF3 and PBR boundaries are projected from reviewed UniProt topology/domain annotations onto the matching IPD protein alignments. Every strict AF3 and PBR output is checked as a contiguous subsequence of its parent precursor.
 
-Deposited records include incomplete entries. By default, queries return human chains with official `Full` status and no unknown residues, or mouse chains that pass accession, fragment, and length checks. Use `--include-partial` to include fragments explicitly. The current mouse registry is a traceable set of commonly used H-2 alleles and does not claim exhaustive H-2 coverage.
+The 34-aa registry is standardized against the public support-name snapshots for NetMHCpan 4.2f and NetMHCIIpan 4.3k. In the human/mouse scope, those snapshots describe 10,395 supported MHC-I names and 11,344 supported MHC-II molecules. This release makes a vetted 34-mer available for 8,743 and 8,956 of them respectively. A supported name is not automatically a known sequence: when neither a deposited source nor a vetted legacy row covers the required contact sequence, the builder reports the name as unavailable instead of imputing a pseudo.
 
-Within the bundled 8,588-name pseudo registry, explicit fallback construction covers 100% of names: human I `2,953/2,953`, human II `5,620/5,620`, mouse I `7/7`, and mouse II `8/8`. Human expression-qualified `N/L/S/Q/C/A` targets remain blocked for AF3 unless `--allow-expression-qualified` is also supplied.
+The 24,444 bundled rows (15,488 MHC-I and 8,956 MHC-II) have explicit evidence: `derived_exact_pbr` (13,560), `derived_contact_complete_full` (89), `derived_contact_complete_partial` (7,223), or `legacy_secondary` (3,572). There are no bundled `official_reference` rows. Optional locally supplied DTU training pseudos are validation oracles only: no oracle-only row is copied into the registry. Exact oracle validation is 215/216 for MHC-I (only `H-2-Kq` remains unavailable) and 5,565/5,631 for MHC-II. Four MHC-I rows with internal indels were safely recovered by using the oracle to select among independently aligned contact columns; their sequence evidence remains deposited protein, not an oracle copy. Partial derivation is accepted only if every required contact residue maps without `X`, gap, or imputation.
 
-The isolated fallback assets contain 4,161 full/fragment rows and 2,097 AF3 rows. The latter comprise 67 exact deposited ectodomains, 1,990 partial-guided constructs, and 40 pseudo-only scaffolds.
+Current-name handling is explicit: historical `HLA-DQA1*01:07` and `HLA-DRB1*15:13` inputs resolve to current `HLA-DQA1*01:07Q` and `HLA-DRB1*15:13Q`. For `HLA-DRB1*13:10`, the retained `legacy_secondary` row is the PUFFIN/NetMHC-compatible `ESSFDSYSIDKATYHVGFT` (`official_training_exact`); it carries a conflict flag against the current-IPD-derived `ESSFDYFDIDKATYHVVFT` rather than silently replacing either observation. The component registry contains 4,386 chain pseudos; 280 rejected/conflicting rows remain quarantined.
 
-Coverage by cumulative policy, counted over pseudo-registry names (`N/L/S/Q/C/A` AF3 targets explicitly enabled for this audit):
+`pseudo_components.csv` is an audit table of resolved, independently supportable chain components, not a promise that every MHC-II pair row has been fully decomposed. In particular, 64 retained `legacy_secondary` pair rows—four disputed DPB1 beta components combined with 16 DPA1 alpha partners—deliberately have no unresolved beta entry in the component table because the legacy, current-IPD-derived, and local-oracle evidence conflicts. The pair rows are retained with provenance; the disputed beta sequence is not promoted into a standalone component.
 
-| Scope | Names | Strict full | `partial` full | `imputed` full | `pseudo-scaffold` full |
-|---|---:|---:|---:|---:|---:|
-| human I | 2,953 | 1,491 | 2,921 | 2,921 | 2,953 |
-| human II | 5,620 | 2,454 | 5,619 | 5,619 | 5,620 |
-| mouse I | 7 | 6 | 7 | 7 | 7 |
-| mouse II | 8 | 5 | 8 | 8 | 8 |
+Deposited records include incomplete entries. By default, queries return human chains with official `Full` status and no unknown residues, or mouse chains that pass accession, fragment, and length checks. Use explicit fallback modes to inspect or construct from fragments. `partial` never pads a short sequence; `imputed` requires deposited guidance; `pseudo-scaffold` is the lowest-confidence structural fallback. Human `N/L/S/Q/C/A` expression-qualified targets remain blocked for AF3 unless explicitly enabled. The mouse registry remains a traceable set of selected H-2 accessions rather than an exhaustive IPD-MHC catalogue.
 
-| Scope | Names | Strict AF3 | `partial` AF3 | `imputed` AF3 | `pseudo-scaffold` AF3 |
-|---|---:|---:|---:|---:|---:|
-| human I | 2,953 | 1,491 | 1,551 | 2,921 | 2,953 |
-| human II | 5,620 | 2,393 | 2,482 | 5,507 | 5,620 |
-| mouse I | 7 | 6 | 6 | 7 | 7 |
-| mouse II | 8 | 6 | 6 | 8 | 8 |
-
-For AF3, `partial` accepts only a deposited sequence that covers the entire selected ectodomain; it never pads a short fragment. `imputed` requires usable deposited guidance and excludes pseudo-only constructs. Only the explicitly lowest-confidence `pseudo-scaffold` level reaches the full 34-aa registry.
+The rebuilt fallback registry contains 18,079 component targets, 13,217 full/fragment rows, 6,626 AF3 rows, and 6,626 matching PBR rows. These counts describe constructs and source fragments, not additional verified biological full sequences.
 
 ## Usage
 
@@ -109,6 +102,24 @@ mhctransform molecule-to-chains 'H-2-IEk' --class II
 ```
 
 When only a human DRB allele is supplied, the package can add `HLA-DRA*01:01` under the common shorthand convention, but this assumption is disclosed in `notes`. DQ and DP require an explicit alpha/beta pair. The package rejects unconstrained Cartesian products and cross-family mismatches such as DQ-alpha/DP-beta or DP-alpha/DQ-beta.
+
+### Peptide-binding-region chains
+
+```bash
+# MHC-I: one contiguous alpha1+alpha2 heavy-chain region (normally 182 aa)
+mhctransform allele-to-pbr 'HLA-A*02:01' --class I
+mhctransform molecule-to-pbr 'HLA-A*02:01' --class I
+
+# MHC-II: two independent chains, alpha1 and beta1
+mhctransform molecule-to-pbr \
+  'HLA-DRA*01:01/HLA-DRB1*15:01' --class II
+
+# Reverse lookup returns every exact chain candidate
+mhctransform pbr-to-allele @pbr_chain.txt \
+  --class I --definition mhci-alpha1-alpha2-v1
+```
+
+For MHC-I, `molecule-to-pbr` returns the heavy-chain alpha1+alpha2 groove and deliberately omits alpha3 and B2M. For MHC-II it returns alpha1 and beta1 as two sequence objects, never a concatenated artificial chain. Typical reviewed domain lengths are 182 aa for MHC-I, 84–96 aa for MHC-II alpha1, and 90–95 aa for MHC-II beta1; exact boundaries are locus- and allele-aware. Fallback PBRs retain observed/imputed spans and evidence levels in the same way as AF3 fallbacks.
 
 ### AF3 extracellular chains and chain pairing
 
@@ -185,6 +196,8 @@ mhctransform pseudo-to-allele \
 
 Reverse conversion is exact-only. A single 34mer is often shared by many alleles, so the result is commonly `exact_ambiguous`. An unknown 34mer returns `not_found`; the package never substitutes a nearest-neighbor prediction.
 
+For MHC-II, a 34mer represents one alpha/beta molecule: 15 calibrated alpha positions followed by 19 calibrated beta positions. A DQ or DP combination in the supported-name space is a computational model input, not evidence that the pair forms a common biological haplotype.
+
 ### Full-sequence reverse lookup
 
 ```bash
@@ -226,30 +239,44 @@ for chain in af3_molecule.candidates[0].chains:
 
 ## Golden-reference results
 
-| Query | Precursor | AF3 profile (1-based precursor coordinates) | 34 aa |
-|---|---:|---|---|
-| `HLA-A*02:01` | 365 aa | 25-308, 284 aa, `GSHSMRY...QPTIPI` | `YFAMYGEKVAHTHVDTLYVRYHYYTWAVLAYTWY` |
-| `B2M-human` | 119 aa | 21-119, 99 aa, `IQRTPK...KWDRDM` | Not applicable |
-| `H-2-Kb` | 369 aa | 22-305, 284 aa, `GPHSLR...STVSNM` | `YVEYYREKAGNSFVDTLYIVSQYYTWAELAYTWY` |
-| `HLA-DRA*01:01` | 254 aa | 26-216, 191 aa | Combined with the next row |
-| `HLA-DRB1*15:01` | 266 aa | 30-227, 198 aa | `QEFFIASGAAVDAIMWPRFDYFDIQAATYHVVFT` |
-| `H-2-IAb` alpha/beta | 256/265 aa | 24-218 (195 aa) / 28-226 (199 aa) | `YSYFLASGGQVVHVLYFGYTYHDIRTETVHGPHT` |
+| Query | Precursor | AF3 profile (1-based precursor coordinates) | PBR | 34 aa |
+|---|---:|---|---|---|
+| `HLA-A*02:01` | 365 aa | 25-308, 284 aa, `GSHSMRY...QPTIPI` | alpha1+alpha2, 182 aa | `YFAMYGEKVAHTHVDTLYVRYHYYTWAVLAYTWY` |
+| `B2M-human` | 119 aa | 21-119, 99 aa, `IQRTPK...KWDRDM` | Not applicable | Not applicable |
+| `H-2-Kb` | 369 aa | 22-305, 284 aa, `GPHSLR...STVSNM` | alpha1+alpha2, 182 aa | `YVEYYREKAGNSFVDTLYIVSQYYTWAELAYTWY` |
+| `HLA-DRA*01:01` | 254 aa | 26-216, 191 aa | alpha1, 84 aa | Combined with the next row |
+| `HLA-DRB1*15:01` | 266 aa | 30-227, 198 aa | beta1, 95 aa | `QEFFIASGAAVDAIMWPRFDYFDIQAATYHVVFT` |
+| `H-2-IAb` alpha/beta | 256/265 aa | 24-218 (195 aa) / 28-226 (199 aa) | separate alpha1/beta1 | `YSYFLASGGQVVHVLYFGYTYHDIRTETVHGPHT` |
 
 The AF3 chain for HLA-A*02:01 ends with `...QPTIPI`; precursor position 309 is `V` and begins the UniProt-annotated TM segment at 309-332, so it must not be retained. The older 274-aa HLA-I crop instead omitted the membrane-proximal connector at positions 299-308 and is therefore not the default AF3 output.
 
 ## Regenerating the data
 
-The builder reuses the local cache. Its first online run needs access to the pinned IPD-IMGT/HLA and PUFFIN sources and to UniProt:
+The core builder reuses the local cache. Its first online run needs access to the pinned IPD-IMGT/HLA sources and UniProt. Without local DTU oracle files it rebuilds the independent strict/PBR and secondary assets, but cannot reproduce the oracle-gated release registry:
 
 ```bash
 python3 tools/build_reference.py
 python3 tools/build_reference.py --offline
 
 # Rebuild only the deterministic fallback assets from existing strict assets
+# (this also rebuilds fallback_pbr_sequences.csv)
 python3 tools/build_fallback_reference.py
+
+# Rebuild strict and fallback PBR assets directly when needed
+python3 tools/build_pbr_reference.py
 ```
 
-The builder does not inherit crops from the legacy `mhcii_model_input.csv`. The human HLA full registry is constructed by combining the matching-release FASTA and `Allele_status.txt`. AF3 chains use the pinned IPD protein alignments to project reviewed UniProt extracellular topology onto exact alleles, and every result must map uniquely back to one parent precursor. The pseudo artifact then normalizes legacy names through the official 2009-to-current nomenclature table and deleted/renamed tables. Mouse chains are retrieved by explicit accession. Mutable UniProt REST batches are pinned with expected SHA-256 values so changed content fails closed instead of silently changing a boundary. All generated files are stably sorted and record source hashes. Five conflicting records in the secondary pseudo mirror are not silently retained or resolved by choosing the first row; they are written to `quarantined_pseudosequences.csv` under an auditable rule.
+Public DTU support-name snapshots are committed under `tools/reference/` with pinned SHA-256 values. To reproduce the release, fetch the optional training pseudos into a local cache and pass them to the integrated builder strictly as validation oracles; the raw archives, extracted oracle files, and oracle-only rows are not committed:
+
+```bash
+python3 tools/fetch_netmhc_training_pseudos.py --cache-dir /path/to/netmhc-cache
+
+python3 tools/build_reference.py \
+  --netmhcpan-training-pseudo /path/to/netmhc-cache/NetMHCpan-4.2-pseudoseqs.dat \
+  --netmhciipan-training-pseudo /path/to/netmhc-cache/NetMHCIIpan-4.3-pseudosequence.2023.dat
+```
+
+For an overlay rebuild from already generated strict/PBR assets, `build_netmhc_pseudo_reference.py --official-pseudo-i ... --official-pseudo-ii ...` followed by `build_fallback_reference.py` is equivalent; the fallback builder also refreshes fallback PBRs. The builder does not inherit crops from the legacy `mhcii_model_input.csv`. Human full records combine the matching-release FASTA and status file. AF3/PBR chains project reviewed UniProt features through pinned IPD alignments and must map uniquely to a parent. MHC-I pseudo contact positions and the MHC-II alpha15+beta19 alignment mappings are versioned. A full, PBR, or deposited partial sequence is used only when all contact residues are unambiguously observed; missing sites are not filled to manufacture a pseudo. Generated outputs and conflict reports are stably sorted and deterministic; `metadata.json` and `pseudo_validation.json` record hashes of source inputs, not hashes of every output file.
 
 ## Tests
 
@@ -257,20 +284,21 @@ The builder does not inherit crops from the legacy `mhcii_model_input.csv`. The 
 PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
 
-The 41 tests cover the original strict behavior plus partial/imputed evidence separation, exact-ectodomain promotion, rare-HLA and H-2 fallbacks, P14437 exact I-A-s topology, expression-suffix and species gating, collision-safe opt-in fallback reverse lookup, and the invariants that all 8,588 pseudo names have AF3 and full fallbacks and every imputed full construct uses a complete precursor template. Strict AF3 chains still satisfy the parent-subsequence invariant; the one signal-free P14437 record is separately verified against its exact UniProt extracellular topology.
+Unit tests cover strict and fallback evidence separation, rare-HLA/H-2 handling, expression-suffix and species gating, collision-safe reverse lookup, complete-template requirements, PBR chain pairing/boundaries, and oracle-gated pseudo validation. Strict AF3 and PBR chains satisfy parent-subsequence invariants; the signal-free P14437 record is checked separately against its reviewed UniProt extracellular topology. Deterministic output was checked separately during release validation by repeating complete rebuilds and comparing their output hashes.
 
 ## Important boundaries
 
 - `precursor_full` means that the source confirms coverage of the complete coding protein record, usually including signal peptide, extracellular domains, TM helix, and cytoplasmic tail. A true null/truncated allele may still be represented by a complete record. This is not the default AF3 input.
 - AF3 structural input may use `af3-soluble-extracellular-v1` directly. Do not use a 34-aa pseudosequence as a foldable chain.
+- PBR is a contiguous structural region, but it is intentionally shorter than the recommended full extracellular AF3 chain and omits stabilizing membrane-proximal domains (and B2M for MHC-I).
 - `source-partial-v1` is a fragment, and `*-imputed-v1` is a synthetic construct. Neither is an official full allele sequence.
 - A pseudo-only scaffold constrains 34 positions, not every peptide/TCR-facing polymorphism; use it for screening rather than allele-specific mechanistic interpretation.
 - P/G groups express identity over selected domains and must not be treated as proof of whole-precursor identity.
-- The current pseudosequence artifact and latest full IPD snapshot have different coverage. A query without an exact pseudo record returns `not_found`.
+- NetMHC support membership, availability of a validated 34mer, and availability of a full/PBR protein are different facts. A query without a safe pseudo source returns `not_found` even when the name appears in an official support list.
 - Source-data licensing and terms are not changed by this project's code license; see [`NOTICE.md`](NOTICE.md).
 
 See [`AUDIT_REPORT.md`](AUDIT_REPORT.md) for the detailed audit, comparison with TCR tools, and AF3 five-chain recommendations.
 
 ## License and data terms
 
-Package code is licensed under the [MIT License](LICENSE). Bundled and derived reference data retain their upstream attribution and applicable terms; the MIT License does not relicense data derived from IPD-IMGT/HLA, UniProt, or PUFFIN.
+Package code is licensed under the [MIT License](LICENSE). Bundled and derived reference data retain upstream attribution and applicable terms; MIT does not relicense data from IPD-IMGT/HLA, UniProt, DTU, or PUFFIN. NetMHCpan/NetMHCIIpan executables, model files, and raw training archives are not distributed by this repository.

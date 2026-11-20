@@ -1,19 +1,20 @@
 # MHC 转换审核、TCR 工具对比与 AF3 五链输入建议
 
-首次审核：2026-11-03；fallback 扩展复核：2026-11-20
+首次审核：2026-11-03；fallback 扩展复核：2026-11-20；PBR 与 NetMHC 4.2f/4.3k 扩展：2026-11-21
 
 ## 结论
 
 旧实现不能作为“人/鼠 MHC-I/MHC-II、全长与 34-aa、双向转换”的正确实现继续使用。它的人 HLA-I 34-aa 数值抽查是对的，但完整范围、命名、反向语义和来源版本不足；MHC-I 默认链不是全长；MHC-II 裁剪表存在系统性错误；mouse 与 MHC-II pseudo 基本缺失。
 
-本轮复核后的新 `MHCtransform` 在其明确声明的覆盖范围内可以通过审核：固定来源、保留歧义、strict full/pseudo/AF3 与 fallback 数据分表分索引，支持人/鼠 MHC-I/MHC-II 正反向查询。它不是全 IPD-MHC 物种全集；mouse 是显式 accession 的常用集合，pseudo 是固定版二级 artifact。医学/移植决策仍应回到当前官方数据库验证。
+本轮复核后的新 `MHCtransform` 在其明确声明的覆盖范围内可以通过审核：固定来源、保留歧义、strict full/PBR/pseudo/AF3 与 fallback 分层，支持人/鼠 MHC-I/MHC-II 正反向查询。它不是全 IPD-MHC 物种全集；mouse 是显式 accession 的常用集合。Pseudo 名称空间已对齐 NetMHCpan 4.2f 与 NetMHCIIpan 4.3k 的公开支持清单，但“官方支持名称”不等于“已有可安全分发的序列”。医学/移植决策仍应回到当前官方数据库验证。
 
 新实现将以下概念彻底分开：
 
 1. `precursor_full`：IPD 官方 sequence status 为 `Full` 且无未知残基，或经显式 UniProt accession/fragment 检查确认覆盖完整 coding protein 的记录；其余 deposited protein 仅在 opt-in 时返回；
 2. `af3-soluble-extracellular-v1`：成熟、完整的可溶性胞外链，去 signal/TM/cytoplasmic，但保留膜近端 connector；
-3. 有 `definition_id` 的 34-aa descriptor：用于泛等位模型，不是结构链。
-4. 显式 fallback：`source-partial-v1` 是 deposited fragment；`precursor-imputed-v1` 与 `af3-soluble-extracellular-imputed-v1` 是保留 deposited/pseudo 约束、其余位置由同物种同位点完整模板提供的合成 scaffold。它们不进入 strict 索引，也不是官方等位基因全长序列。
+3. 连续 PBR：MHC-I 为一条 alpha1+alpha2；MHC-II 为独立 alpha1 与 beta1 两条链。它用于肽结合槽比较与 pseudo 核验，不替代完整胞外 AF3 链；
+4. 有 `definition_id` 的 34-aa descriptor：用于泛等位模型，不是结构链；
+5. 显式 fallback：`source-partial-v1` 是 deposited fragment；`precursor-imputed-v1` 与 `af3-soluble-extracellular-imputed-v1` 是保留 deposited/pseudo 约束、其余位置由同物种同位点完整模板提供的合成 scaffold。它们不进入 strict 索引，也不是官方等位基因全长序列。
 
 正向查询不任意挑选 first row。严格反查返回全部 `exact_*` candidates；fallback 构建默认不参与反查，显式纳入后只返回 `compatible_*`，防止把合成序列误写成生物学精确匹配。
 
@@ -24,15 +25,40 @@
 - AF3 builder 曾有两个潜在错误：IPD 可视化 alignment 的 partial/stop-loss 行不能按普通空白切割；UniProt topology 也不能只按长度套到 alignment 第一行。现在 parser 保留对齐列，且每个 locus 必须先找到与 UniProt topology reference **全序列完全相同**的 IPD row，再向 exact deposited allele 投影。
 - AF3 provenance 现在一行对应一个 parent full record 和一个明确 `start-end`，避免 parent ID 列表与 span 列表失配。
 
-离线重建完成后共有 29,514 个 deposited protein records、13,484 个 strict AF3-ready chain records 和 8,588 个 pseudo records；独立 fallback 表另含 4,161 条 full/fragment 记录与 2,097 条 AF3 构建。41 项单元测试全部通过，并对 strict AF3 链验证 `af3 == parent[start-1:end]`；无信号肽的 mouse I-A-s α 链 P14437 另按其 reviewed UniProt 胞外 topology 验证。
+本轮扩展后保留 29,514 个 deposited protein records、13,484 个 strict AF3-ready chains、13,482 个 strict PBR chains 与 24,444 个 pseudo records（MHC-I 15,488；MHC-II 8,956）。严格 AF3/PBR 都验证为 parent 的连续子序列；无信号肽的 mouse I-A-s alpha 链 P14437 另按 reviewed UniProt 胞外 topology 验证。Pseudo 输出另有逐条 evidence、official-support、validation status、来源记录与质量标志。
+
+## PBR 与 34-aa pseudo 的关系
+
+新增 PBR 是“完整肽结合槽结构域”，而不是另一套 pseudo：
+
+- MHC-I 输出一条连续 heavy-chain alpha1+alpha2，经典 HLA/H-2 通常 182 aa，不含 alpha3 与 B2M；
+- MHC-II 输出两条独立链：alpha1（人类常见 84–96 aa）与 beta1（90–95 aa），绝不人工拼接；
+- NetMHCpan-I 的 34 个接触位点全部位于 alpha1+alpha2；NetMHCIIpan-II 的 alpha15/beta19 全部位于各自 alpha1/beta1，因此 PBR 是提取与反向核验 pseudo 的合适连续上位表示；
+- pMHC–TCR 的 AF3 默认仍使用完整可溶性胞外链。仅用 PBR 会省略膜近端稳定域，并可能暴露非天然截面；MHC-I 还会缺失 B2M。
+
+人类边界采用 reviewed UniProt domain REGION，并通过同位点 IPD alignment 投影到具体等位基因：MHC-I 182；DRA 84；DQA1 96（少数 indel 为 95）；DPA1 87；DRB1/3/4/5 95；DQB1 94；DPB1 92 aa。小鼠按具体 accession/位点投影，不把一个固定长度套到所有 H-2。
+
+## NetMHCpan 4.2f / NetMHCIIpan 4.3k 对齐
+
+项目提交了官方网页公开的支持名称快照及 SHA-256，而没有提交 DTU 可执行程序、模型文件或原始训练归档：
+
+- NetMHCpan 4.2f：人/鼠审核范围 10,395 个支持名称，本地可为其中 8,743 个提供经审查的 34-aa 伪序列；
+- NetMHCIIpan 4.3k：DR、DPA1×DPB1、DQA1×DQB1 及小鼠共 11,344 个支持分子，本地可为其中 8,956 个提供经审查的 34-aa 伪序列；
+- 扩展 registry 共 24,444 行，其中 `derived_exact_pbr` 13,560、`derived_contact_complete_full` 89、`derived_contact_complete_partial` 7,223、`legacy_secondary` 3,572；组件 pseudo 4,386 条，另有 280 条冲突/不可接受记录隔离。
+
+构建顺序为：从 strict PBR 精确提取；其次允许 deposited full/partial，但必须覆盖全部接触列且不含 `X`、gap 或插补；最后保留无冲突的 legacy secondary。DTU training pseudo 只作为本地 validation oracle，不复制任何 oracle-only 行，也不存在捆绑的 `official_reference` evidence。Oracle 精确核验为 MHC-I `215/216`（只缺 `H-2-Kq`）和 MHC-II `5,565/5,631`。4 条有内部 indel 的 MHC-I 记录通过 oracle 在独立 alignment contact-column 候选间选择后安全恢复，sequence evidence 仍来自 deposited protein。任一接触位点缺失便停止，不用模板补出 pseudo。DQ/DP 的笛卡尔支持空间只代表模型允许的链组合，不代表 haplotype 或体内稳定性证据。
+
+命名和冲突不静默处理：历史 `HLA-DQA1*01:07` 与 `HLA-DRB1*15:13` 分别解析为当前 `HLA-DQA1*01:07Q` 与 `HLA-DRB1*15:13Q`。`HLA-DRB1*13:10` 保留的是 PUFFIN/NetMHC-compatible `legacy_secondary` 序列 `ESSFDSYSIDKATYHVGFT`（`official_training_exact`），并标记它与 current-IPD-derived `ESSFDYFDIDKATYHVVFT` 的冲突；不能反过来写成保留 IPD 派生行。
+
+`pseudo_components.csv` 的 4,386 行是“已解析且可独立证明的链组分”审计表，不是全部 MHC-II pair 的完整分解。共有 64 条保留的 `legacy_secondary` pair（4 个争议 DPB1 beta 组分 × 16 个 DPA1 alpha partner）；由于 legacy、current IPD 与本地 oracle 三类证据冲突，这些 pair 故意不向 component 表写入未解析 beta。Pair 级 pseudo 与 provenance 仍保留，但不能据此宣称争议 beta 已被单独验证。
 
 ## 基于 34-aa pseudo 的全面 fallback 复核
 
-在 bundled pseudo registry 的声明范围内，显式 `pseudo-scaffold` 模式可为全部 8,588 个名称生成 AF3 输入：human MHC-I `2,953/2,953`、human MHC-II `5,620/5,620`、mouse MHC-I `7/7`、mouse MHC-II `8/8`。这表示“存在可追踪的结构 scaffold”，不表示从 34 aa 唯一恢复了真实全长。
+扩展后的 34-aa registry 仍不能把 pseudo 唯一恢复成 full/PBR/AF3。15,478 个 human MHC-I 名称只对应 4,279 个唯一 pseudo；8,948 个 human MHC-II 分子只对应 1,695 个。
 
-最终 fallback 表中，AF3 层包括 67 条 `source_exact_ectodomain`、1,990 条 `partial_guided_imputed` 和 40 条 `pseudo_only_scaffold`；full/fragment 层包括 2,064 条 `source_partial`、2,057 条 `partial_guided_imputed` 与 40 条 `pseudo_only_scaffold`。其中 exact ectodomain 表示 deposited fragment 已覆盖所选 AF3 全区，但不代表它同时覆盖 signal/TM/cytoplasmic precursor。
+Fallback 能提供可追踪的结构 scaffold，但不表示从 34 aa 恢复了真实全长。本版对 18,079 个 component targets 生成 13,217 条 full/fragment、6,626 条 AF3 与 6,626 条 PBR。Exact ectodomain 表示 deposited fragment 覆盖所选 AF3 全区，也不代表它同时覆盖 signal/TM/cytoplasmic precursor。
 
-34-aa 表示本身不可逆：2,953 个 human MHC-I 名称只有 1,574 个唯一 pseudo；5,620 个 human MHC-II 名称只有 1,160 个唯一 pseudo。多个等位基因可共享同一 34mer，且这些位置主要描述 peptide-binding 接触位点，不能确定非 pseudo 区域或全部 TCR 接触面。因此 fallback 采用累积、默认关闭的四级策略：
+多个等位基因可共享同一 34mer，且这些位置不能确定非 pseudo 区域或全部 TCR 接触面。因此 fallback 采用累积、默认关闭的四级策略：
 
 1. `none`：只返回 strict 官方/可核验序列；
 2. `partial`：仅返回 deposited fragment，绝不标为 full；
@@ -45,7 +71,7 @@
 
 ## 旧版 MHC 部分审核
 
-审核对象是本地 [`convert_tcr_pmhc_full_sequences.py`](../convert_tcr_pmhc_full_sequences.py) 及其默认数据表。
+审核对象是保留在 legacy 目录的 [`convert_tcr_pmhc_full_sequences.py`](../legacy/tcr_design_v1/convert_tcr_pmhc_full_sequences.py) 及其默认数据表。
 
 ### 1. `--species mouse` 没有切换 MHC 数据
 
@@ -104,11 +130,11 @@
 - human 等位基因命名规则： [WHO HLA nomenclature](https://hla.alleles.org/pages/nomenclature/naming_alleles/)；
 - mouse gene/allele/strain 命名以 MGI 为权威层级，MHC 名称/蛋白映射参考 [IMGT mouse MHC nomenclature](https://www.imgt.org/IMGTrepertoireMH/LocusGenes/nomenclatures/mouse/MHC/Mu_MHCnom.html)；
 - mouse/B2M 蛋白：显式 [UniProt](https://www.uniprot.org/) accession；
-- 34-aa 标准来源是上述 NetMHCpan/NetMHCIIpan 论文与 [DTU 官方补充数据](https://services.healthtech.dtu.dk/suppl/immunology/NAR_NetMHCpan_NetMHCIIpan/)；本项目的分发 artifact 使用 [PUFFIN public repository](https://github.com/gifford-lab/PUFFIN) 二级镜像，并在 metadata 中记录内容哈希。
+- 34-aa 标准来源是上述 NetMHCpan/NetMHCIIpan 论文；支持名称使用 DTU 4.2f/4.3k 公开快照，pseudo evidence 只来自 PBR/full/partial 精确派生与 [PUFFIN public repository](https://github.com/gifford-lab/PUFFIN) legacy secondary。DTU training pseudo 仅作本地 oracle 核验，不复制 oracle-only 行。生成输出稳定排序且具有确定性；metadata/validation report 记录 source input 哈希，而不是宣称每个输出文件都有记录哈希。
 
 MHCflurry 是 MHC-I-only，并同时存在 34/37/39 位 artifact；34 位是 NetMHCpan-derived 表示，37/39 位是其他模型表示。模型权重依赖精确定义，不能只看“pseudo”字段名就互换。其实现说明见 [MHCflurry pseudosequences module](https://openvax.github.io/mhcflurry/_modules/mhcflurry/pseudosequences.html)。
 
-Pseudo 构建器还使用同版官方 `Nomenclature_2009.txt` 与 `Deleted_alleles.txt`，把 artifact 中的 pre-2010/已重命名条目映射到现行写法；保留 HLA 冒号字段边界，避免 `A*02:11:02` 与 `A*02:1102` 碰撞。二级镜像固定在 PUFFIN commit `eddf17d972285a89e80e2837adc1ee6308f5b96b`；其中检测到的 5 个互相冲突记录被写入 `quarantined_pseudosequences.csv`，不进入运行时查询。MHC-II molecule resolver 只允许 DRα–DRβ、DQα–DQβ、DPα–DPβ 及对应 mouse I-A/I-E 家族配对。
+Pseudo 构建器保留 HLA 冒号字段边界，避免 `A*02:11:02` 与 `A*02:1102` 碰撞；所有来源冲突及不完整接触位点都写入 quarantine/validation report，不静默任选首条。MHC-II molecule resolver 只允许 DRalpha–DRbeta、DQalpha–DQbeta、DPalpha–DPbeta 及对应 mouse I-A/I-E 家族配对。
 
 ## AF3 链转换的审核结果
 

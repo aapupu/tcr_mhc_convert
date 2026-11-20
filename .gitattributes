@@ -1,0 +1,3 @@
+# The official NetMHCIIpan support snapshot is fixed-width text. Preserve it
+# byte-for-byte (including padding) so its pinned upstream SHA-256 stays valid.
+MHCtransform/tools/reference/NetMHCIIpan-4.3-alleles_name.txt whitespace=-blank-at-eol,-blank-at-eof

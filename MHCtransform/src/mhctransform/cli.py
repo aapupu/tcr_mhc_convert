@@ -10,6 +10,7 @@ from typing import Sequence
 from .errors import MHCTransformError
 from .fallback import FALLBACK_POLICIES
 from .registry import AF3_DEFINITION, MHCRegistry
+from .pbr import PBR_DEFINITIONS
 
 
 def _sequence_argument(value: str) -> str:
@@ -22,8 +23,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="mhctransform",
         description=(
-            "Auditable human/mouse MHC precursor, AF3 extracellular-chain and "
-            "34-aa pseudosequence lookup with explicit fallback policies"
+            "Auditable human/mouse MHC precursor, AF3 extracellular-chain, "
+            "peptide-binding-region and 34-aa pseudosequence lookup with "
+            "explicit fallback policies"
         ),
     )
     parser.add_argument("--data-dir", help="use an unpacked registry directory")
@@ -115,6 +117,43 @@ def build_parser() -> argparse.ArgumentParser:
     molecule_af3.add_argument("--fallback", choices=FALLBACK_POLICIES, default="none")
     molecule_af3.add_argument("--allow-expression-qualified", action="store_true")
 
+    allele_pbr = subparsers.add_parser(
+        "allele-to-pbr",
+        help="chain allele/name -> contiguous peptide-binding structural region",
+    )
+    allele_pbr.add_argument("name")
+    allele_pbr.add_argument("--class", dest="mhc_class", choices=("I", "II"))
+    allele_pbr.add_argument("--species", choices=("human", "mouse"))
+    allele_pbr.add_argument("--definition", choices=PBR_DEFINITIONS)
+    allele_pbr.add_argument("--allow-two-field-projection", action="store_true")
+    allele_pbr.add_argument("--fallback", choices=FALLBACK_POLICIES, default="none")
+    allele_pbr.add_argument("--allow-expression-qualified", action="store_true")
+
+    pbr_allele = subparsers.add_parser(
+        "pbr-to-allele",
+        help="peptide-binding-region sequence -> exact or compatible chain names",
+    )
+    pbr_allele.add_argument("sequence", help="amino acids, or @path")
+    pbr_allele.add_argument("--class", dest="mhc_class", choices=("I", "II"))
+    pbr_allele.add_argument("--species", choices=("human", "mouse"))
+    pbr_allele.add_argument("--definition", choices=PBR_DEFINITIONS)
+    pbr_allele.add_argument(
+        "--include-fallback", choices=FALLBACK_POLICIES, default="none"
+    )
+
+    molecule_pbr = subparsers.add_parser(
+        "molecule-to-pbr",
+        help="MHC-I -> alpha1+alpha2, or MHC-II -> separate alpha1 and beta1 chains",
+    )
+    molecule_pbr.add_argument("name")
+    molecule_pbr.add_argument(
+        "--class", dest="mhc_class", choices=("I", "II"), required=True
+    )
+    molecule_pbr.add_argument("--species", choices=("human", "mouse"))
+    molecule_pbr.add_argument("--allow-two-field-projection", action="store_true")
+    molecule_pbr.add_argument("--fallback", choices=FALLBACK_POLICIES, default="none")
+    molecule_pbr.add_argument("--allow-expression-qualified", action="store_true")
+
     coverage = subparsers.add_parser(
         "coverage", help="summarize strict, partial, imputed and scaffold availability"
     )
@@ -196,6 +235,33 @@ def main(argv: Sequence[str] | None = None) -> int:
                 mhc_class=args.mhc_class,
                 species=args.species,
                 definition_id=args.definition,
+                allow_two_field_projection=args.allow_two_field_projection,
+                fallback=args.fallback,
+                allow_expression_qualified=args.allow_expression_qualified,
+            ).as_dict()
+        elif args.command == "allele-to-pbr":
+            result = registry.allele_to_pbr(
+                args.name,
+                mhc_class=args.mhc_class,
+                species=args.species,
+                definition_id=args.definition,
+                allow_two_field_projection=args.allow_two_field_projection,
+                fallback=args.fallback,
+                allow_expression_qualified=args.allow_expression_qualified,
+            ).as_dict()
+        elif args.command == "pbr-to-allele":
+            result = registry.pbr_to_alleles(
+                _sequence_argument(args.sequence),
+                mhc_class=args.mhc_class,
+                species=args.species,
+                definition_id=args.definition,
+                include_fallback=args.include_fallback,
+            ).as_dict()
+        elif args.command == "molecule-to-pbr":
+            result = registry.molecule_to_pbr_chains(
+                args.name,
+                mhc_class=args.mhc_class,
+                species=args.species,
                 allow_two_field_projection=args.allow_two_field_projection,
                 fallback=args.fallback,
                 allow_expression_qualified=args.allow_expression_qualified,

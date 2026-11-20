@@ -1462,6 +1462,13 @@ def build(args: argparse.Namespace) -> None:
     output_dir = args.output_dir.resolve()
     if bool(args.hla_fasta) != bool(args.hla_status):
         raise ValueError("--hla-fasta and --hla-status must be supplied together")
+    if bool(args.netmhcpan_training_pseudo) != bool(
+        args.netmhciipan_training_pseudo
+    ):
+        raise ValueError(
+            "--netmhcpan-training-pseudo and --netmhciipan-training-pseudo "
+            "must be supplied together"
+        )
     if args.hla_fasta:
         hla_path = args.hla_fasta.resolve()
         hla_status_path = args.hla_status.resolve()
@@ -1542,6 +1549,12 @@ def build(args: argparse.Namespace) -> None:
     write_csv(output_dir / "full_sequences.csv", FULL_FIELDS, full_rows)
     write_csv(output_dir / "af3_sequences.csv", AF3_FIELDS, af3_rows)
     write_csv(output_dir / "pseudo_sequences.csv", PSEUDO_FIELDS, pseudo_rows)
+    # Preserve the pinned compatibility snapshot separately.  The later
+    # NetMHC overlay is independently reconstructed from PBR/contact-complete
+    # proteins and must never use its own prior output as a baseline.
+    write_csv(
+        output_dir / "secondary_pseudo_sequences.csv", PSEUDO_FIELDS, pseudo_rows
+    )
     write_csv(output_dir / "molecule_pairs.csv", PAIR_FIELDS, pair_rows)
     write_csv(
         output_dir / "quarantined_pseudosequences.csv",
@@ -1553,6 +1566,12 @@ def build(args: argparse.Namespace) -> None:
         AF3_EXCLUSION_FIELDS,
         excluded_af3_rows,
     )
+
+    # PBR construction depends only on the finalized strict AF3 registry and
+    # must precede fallback construction (which instantiates MHCRegistry).
+    from build_pbr_reference import build_strict_pbr_file, pbr_metadata_fields
+
+    pbr_count = build_strict_pbr_file(output_dir)
 
     metadata = {
         "schema_version": 3,
@@ -1568,6 +1587,7 @@ def build(args: argparse.Namespace) -> None:
             "af3_total": len(af3_rows),
             "af3_excluded_complete": len(excluded_af3_rows),
             "af3_by_species_class": count_by(af3_rows, "species", "mhc_class"),
+            "pbr_total": pbr_count,
             "pseudo_total": len(pseudo_rows),
             "pseudo_quarantined": len(quarantined_pseudos),
             "pseudo_by_species_class": count_by(pseudo_rows, "species", "mhc_class"),
@@ -1685,9 +1705,32 @@ def build(args: argparse.Namespace) -> None:
             "warning": "Complete means the bundled source represents the complete coding protein record. It is not an assertion of cell-surface expression; biologically truncating/null alleles can be complete records.",
         },
     }
+    metadata.update(pbr_metadata_fields())
     with (output_dir / "metadata.json").open("w", encoding="utf-8") as handle:
         json.dump(metadata, handle, ensure_ascii=False, indent=2, sort_keys=True)
         handle.write("\n")
+
+    if args.netmhcpan_training_pseudo:
+        from build_netmhc_pseudo_reference import build as build_netmhc_pseudos
+
+        build_netmhc_pseudos(
+            argparse.Namespace(
+                data_dir=output_dir,
+                supported_i=args.netmhcpan_support_list.resolve(),
+                supported_ii=args.netmhciipan_support_list.resolve(),
+                official_pseudo_i=args.netmhcpan_training_pseudo.resolve(),
+                official_pseudo_ii=args.netmhciipan_training_pseudo.resolve(),
+            )
+        )
+        with (output_dir / "metadata.json").open("r", encoding="utf-8") as handle:
+            metadata = json.load(handle)
+    else:
+        # A baseline-only rebuild must not leave audit assets from a previous
+        # enhanced overlay beside the newly reset pseudo registry.
+        for stale_name in ("pseudo_components.csv", "pseudo_validation.json"):
+            stale_path = output_dir / stale_name
+            if stale_path.is_file():
+                stale_path.unlink()
 
     # Fallback construction intentionally runs only after the strict registry
     # and its preliminary metadata are complete.  It reads those immutable
@@ -1722,6 +1765,26 @@ def parser() -> argparse.ArgumentParser:
     )
     result.add_argument(
         "--output-dir", type=Path, default=project_root / "src/mhctransform/data"
+    )
+    result.add_argument(
+        "--netmhcpan-support-list",
+        type=Path,
+        default=project_root / "tools/reference/NetMHCpan-4.2-allele.list",
+    )
+    result.add_argument(
+        "--netmhciipan-support-list",
+        type=Path,
+        default=project_root / "tools/reference/NetMHCIIpan-4.3-alleles_name.txt",
+    )
+    result.add_argument(
+        "--netmhcpan-training-pseudo",
+        type=Path,
+        help="optional locally fetched DTU training pseudo file used only as a validation gate",
+    )
+    result.add_argument(
+        "--netmhciipan-training-pseudo",
+        type=Path,
+        help="matching local DTU training pseudo file used only as a validation gate",
     )
     result.add_argument("--offline", action="store_true")
     return result

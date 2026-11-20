@@ -10,7 +10,7 @@ This repository was renamed from `aapupu/tcr_design`.
 
 | Package | Main capabilities | CLI |
 |---|---|---|
-| [`MHCtransform`](MHCtransform/) | Strict bidirectional conversion between human/mouse MHC-I or MHC-II names and precursor proteins, AF3-ready extracellular chains, or 34-aa pseudosequences, plus isolated opt-in partial/imputed/pseudo-scaffold fallbacks; species-matched B2M for MHC-I and separate alpha/beta chains for MHC-II | `mhctransform` |
+| [`MHCtransform`](MHCtransform/) | Strict bidirectional conversion between human/mouse MHC-I or MHC-II names and precursor proteins, AF3-ready extracellular chains, contiguous peptide-binding regions (PBRs), or 34-aa pseudosequences, plus isolated opt-in fallbacks; species-matched B2M for MHC-I and separate alpha/beta chains for MHC-II | `mhctransform` |
 | [`TCRtransform`](TCRtransform/) | Human/mouse alpha/beta TCR extracellular-chain reconstruction from V + CDR3 + J + C, CDR1/2/2.5/3 annotation, CDR3 boundary analysis, and reverse parsing of complete extracellular chains | `tcrtransform` |
 
 Both packages use only the Python standard library at runtime and support Python 3.9 or newer. They share one GitHub repository while retaining independent package names, versions, APIs, and command-line programs, so they can be installed separately or together.
@@ -28,7 +28,7 @@ python -m pip install -e ./MHCtransform -e ./TCRtransform
 
 ## Quick start
 
-### MHC allele to precursor, AF3 chain, or 34-aa pseudo
+### MHC allele to precursor, peptide-binding region, AF3 chain, or 34-aa pseudo
 
 ```bash
 # HLA-A heavy-chain precursor
@@ -41,6 +41,13 @@ mhctransform molecule-to-af3 'HLA-A*02:01' --class I
 mhctransform molecule-to-af3 \
   'HLA-DRA*01:01/HLA-DRB1*15:01' --class II
 
+# Contiguous peptide-binding domains: one alpha1+alpha2 chain for MHC-I
+mhctransform molecule-to-pbr 'HLA-A*02:01' --class I
+
+# MHC-II PBR: separate alpha1 and beta1 chains
+mhctransform molecule-to-pbr \
+  'HLA-DRA*01:01/HLA-DRB1*15:01' --class II
+
 # Rare allele: retain deposited residues and fill only missing AF3 positions
 mhctransform molecule-to-af3 'HLA-B*08:03' \
   --class I --fallback imputed
@@ -50,7 +57,7 @@ mhctransform allele-to-pseudo 'HLA-A*02:01' \
   --class I --definition netmhcpan-34-v1
 ```
 
-Use `full-to-allele`, `af3-to-allele`, and `pseudo-to-allele` for reverse lookup. Strict sequences return all exact candidates. Fallback constructs are excluded unless `--include-fallback` is supplied, and then return `compatible_*` candidates rather than claiming a biological exact match. See the [`MHCtransform` documentation](MHCtransform/README.md) and [audit report](MHCtransform/AUDIT_REPORT.md) for definitions, coverage, limitations, and provenance.
+Use `full-to-allele`, `af3-to-allele`, `pbr-to-allele`, and `pseudo-to-allele` for reverse lookup. Strict sequences return all exact candidates. Fallback constructs are excluded unless explicitly requested, and then return `compatible_*` candidates rather than claiming a biological exact match. See the [`MHCtransform` documentation](MHCtransform/README.md) and [audit report](MHCtransform/AUDIT_REPORT.md) for definitions, coverage, limitations, and provenance.
 
 ### TCR V/J/CDR3 to AF3-ready alpha/beta extracellular chains
 
@@ -105,4 +112,4 @@ tcr_mhc_convert/
 
 ## License and data terms
 
-Repository code is licensed under the [MIT License](LICENSE). Each package's `NOTICE.md` and data metadata record the pinned versions, checksums, and provenance of upstream resources including IPD-IMGT/HLA, UniProt, tcrdist3, and PUFFIN. The MIT License applies to repository code; it does not relicense bundled or derived biological reference data. Review the applicable upstream terms before redistributing those data.
+Repository code is licensed under the [MIT License](LICENSE). Each package's `NOTICE.md` and data metadata record pinned versions, checksums, and provenance for upstream resources including IPD-IMGT/HLA, UniProt, tcrdist3, the public NetMHCpan 4.2f/NetMHCIIpan 4.3k support lists, and the legacy PUFFIN mirror. The MIT License applies to repository code; it does not relicense bundled or derived biological reference data. DTU executables, model files, raw training archives, and oracle-only pseudo rows are not redistributed. Review the applicable upstream terms before redistributing data.

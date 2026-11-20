@@ -16,8 +16,11 @@ from .models import (
     AF3MoleculeCandidate,
     AF3SequenceCandidate,
     FallbackAF3SequenceCandidate,
+    FallbackPBRSequenceCandidate,
     FallbackSequenceCandidate,
     MoleculeCandidate,
+    PBRMoleculeCandidate,
+    PBRSequenceCandidate,
     PseudoCandidate,
     QueryResult,
     SequenceCandidate,
@@ -38,15 +41,31 @@ from .names import (
     normalize_sequence,
     two_field_hla,
 )
+from .pbr import PBR_DEFINITIONS
 
 
 PSEUDO_I_DEFINITION = "netmhcpan-34-v1"
 PSEUDO_II_DEFINITION = "netmhciipan-34-v1"
 AF3_DEFINITION = "af3-soluble-extracellular-v1"
+CURRENT_Q_COMPATIBILITY_ALIASES: Mapping[str, str] = {
+    "HLA-DQA1*01:07Q": "HLA-DQA1*01:07",
+    "HLA-DRB1*15:13Q": "HLA-DRB1*15:13",
+}
 
 
 def _split_aliases(value: str) -> Tuple[str, ...]:
     return tuple(part for part in value.split(";") if part)
+
+
+def _index_names(primary: str, aliases: Iterable[str]) -> Tuple[str, ...]:
+    """Return stored names plus two explicit NetMHC historical aliases."""
+
+    names = {primary, *aliases}
+    keys = {exact_name_key(name) for name in names}
+    for current, historical in CURRENT_Q_COMPATIBILITY_ALIASES.items():
+        if exact_name_key(current) in keys:
+            names.add(historical)
+    return tuple(sorted(names))
 
 
 def _deduplicate(candidates: Iterable[object]) -> Tuple[object, ...]:
@@ -111,9 +130,14 @@ class MHCRegistry:
             data_root.joinpath("excluded_af3_sequences.csv")
         )
         self._pseudos = self._load_pseudos(data_root.joinpath("pseudo_sequences.csv"))
+        pbr_path = data_root.joinpath("pbr_sequences.csv")
+        self._pbr_sequences = (
+            self._load_pbr_sequences(pbr_path) if pbr_path.is_file() else ()
+        )
         self._pairs = self._load_pairs(data_root.joinpath("molecule_pairs.csv"))
         fallback_full_path = data_root.joinpath("fallback_full_sequences.csv")
         fallback_af3_path = data_root.joinpath("fallback_af3_sequences.csv")
+        fallback_pbr_path = data_root.joinpath("fallback_pbr_sequences.csv")
         self._fallback_sequences = (
             self._load_fallback_sequences(fallback_full_path, af3=False)
             if fallback_full_path.is_file()
@@ -124,32 +148,46 @@ class MHCRegistry:
             if fallback_af3_path.is_file()
             else ()
         )
+        self._fallback_pbr_sequences = (
+            self._load_fallback_pbr_sequences(fallback_pbr_path)
+            if fallback_pbr_path.is_file()
+            else ()
+        )
         with data_root.joinpath("metadata.json").open("r", encoding="utf-8") as handle:
             self.metadata: Mapping[str, object] = json.load(handle)
 
         self._sequence_name_index: DefaultDict[str, List[SequenceCandidate]] = defaultdict(list)
         self._sequence_value_index: DefaultDict[str, List[SequenceCandidate]] = defaultdict(list)
         for candidate in self._sequences:
-            for name in (candidate.allele, *candidate.aliases):
+            for name in _index_names(candidate.allele, candidate.aliases):
                 self._sequence_name_index[exact_name_key(name)].append(candidate)
             self._sequence_value_index[candidate.sequence].append(candidate)
 
         self._af3_name_index: DefaultDict[str, List[AF3SequenceCandidate]] = defaultdict(list)
         self._af3_value_index: DefaultDict[str, List[AF3SequenceCandidate]] = defaultdict(list)
         for candidate in self._af3_sequences:
-            for name in (candidate.allele, *candidate.aliases):
+            for name in _index_names(candidate.allele, candidate.aliases):
                 self._af3_name_index[exact_name_key(name)].append(candidate)
             self._af3_value_index[candidate.sequence].append(candidate)
 
+        self._pbr_name_index: DefaultDict[str, List[PBRSequenceCandidate]] = defaultdict(list)
+        self._pbr_value_index: DefaultDict[str, List[PBRSequenceCandidate]] = defaultdict(list)
+        for candidate in self._pbr_sequences:
+            for name in _index_names(candidate.allele, candidate.aliases):
+                self._pbr_name_index[exact_name_key(name)].append(candidate)
+            self._pbr_value_index[candidate.sequence].append(candidate)
+
         self._af3_exclusion_index: DefaultDict[str, List[Mapping[str, str]]] = defaultdict(list)
         for exclusion in self._af3_exclusions:
-            for name in (exclusion["allele"], *_split_aliases(exclusion["aliases"])):
+            for name in _index_names(
+                exclusion["allele"], _split_aliases(exclusion["aliases"])
+            ):
                 self._af3_exclusion_index[exact_name_key(name)].append(exclusion)
 
         self._pseudo_name_index: DefaultDict[str, List[PseudoCandidate]] = defaultdict(list)
         self._pseudo_value_index: DefaultDict[str, List[PseudoCandidate]] = defaultdict(list)
         for candidate in self._pseudos:
-            for name in (candidate.canonical_name, *candidate.aliases):
+            for name in _index_names(candidate.canonical_name, candidate.aliases):
                 self._pseudo_name_index[exact_name_key(name)].append(candidate)
             self._pseudo_value_index[candidate.pseudo_sequence].append(candidate)
 
@@ -165,7 +203,7 @@ class MHCRegistry:
             str, List[FallbackSequenceCandidate]
         ] = defaultdict(list)
         for candidate in self._fallback_sequences:
-            for name in (candidate.allele, *candidate.aliases):
+            for name in _index_names(candidate.allele, candidate.aliases):
                 self._fallback_sequence_name_index[exact_name_key(name)].append(candidate)
             self._fallback_sequence_value_index[candidate.sequence].append(candidate)
 
@@ -176,9 +214,20 @@ class MHCRegistry:
             str, List[FallbackAF3SequenceCandidate]
         ] = defaultdict(list)
         for candidate in self._fallback_af3_sequences:
-            for name in (candidate.allele, *candidate.aliases):
+            for name in _index_names(candidate.allele, candidate.aliases):
                 self._fallback_af3_name_index[exact_name_key(name)].append(candidate)
             self._fallback_af3_value_index[candidate.sequence].append(candidate)
+
+        self._fallback_pbr_name_index: DefaultDict[
+            str, List[FallbackPBRSequenceCandidate]
+        ] = defaultdict(list)
+        self._fallback_pbr_value_index: DefaultDict[
+            str, List[FallbackPBRSequenceCandidate]
+        ] = defaultdict(list)
+        for candidate in self._fallback_pbr_sequences:
+            for name in _index_names(candidate.allele, candidate.aliases):
+                self._fallback_pbr_name_index[exact_name_key(name)].append(candidate)
+            self._fallback_pbr_value_index[candidate.sequence].append(candidate)
 
     @staticmethod
     def _load_sequences(path: object) -> Tuple[SequenceCandidate, ...]:
@@ -222,6 +271,16 @@ class MHCRegistry:
                         beta_allele=row["beta_allele"],
                         source=row["source"],
                         source_version=row["source_version"],
+                        evidence_level=row.get("evidence_level", "legacy_secondary"),
+                        official_support=row.get("official_support", "false").lower()
+                        == "true",
+                        validation_status=row.get(
+                            "validation_status", "legacy_secondary_only"
+                        ),
+                        source_record_ids=_split_aliases(
+                            row.get("source_record_ids", "")
+                        ),
+                        quality_flags=_split_aliases(row.get("quality_flags", "")),
                     )
                 )
         return tuple(candidates)
@@ -250,6 +309,43 @@ class MHCRegistry:
                         source_full_record_id=row["source_full_record_id"],
                         precursor_start_1based=int(span_match.group(1)),
                         precursor_end_1based=int(span_match.group(2)),
+                        boundary_method=row["boundary_method"],
+                        boundary_source=row["boundary_source"],
+                        source_accession=row["source_accession"],
+                    )
+                )
+        return tuple(candidates)
+
+    @staticmethod
+    def _load_pbr_sequences(path: object) -> Tuple[PBRSequenceCandidate, ...]:
+        candidates = []
+        with path.open("r", encoding="utf-8", newline="") as handle:
+            for row in csv.DictReader(handle):
+                af3_span = re.fullmatch(r"([0-9]+)-([0-9]+)", row["af3_span_1based"])
+                precursor_span = re.fullmatch(
+                    r"([0-9]+)-([0-9]+)", row["precursor_span_1based"]
+                )
+                if af3_span is None or precursor_span is None:
+                    raise MHCTransformError(
+                        f"invalid PBR span for {row['record_id']}"
+                    )
+                candidates.append(
+                    PBRSequenceCandidate(
+                        record_id=row["record_id"],
+                        allele=row["allele"],
+                        aliases=_split_aliases(row["aliases"]),
+                        species=row["species"],
+                        mhc_class=row["mhc_class"],
+                        chain_role=row["chain_role"],
+                        locus=row["locus"],
+                        definition_id=row["definition_id"],
+                        sequence=row["sequence"],
+                        source_af3_record_id=row["source_af3_record_id"],
+                        af3_start_1based=int(af3_span.group(1)),
+                        af3_end_1based=int(af3_span.group(2)),
+                        source_full_record_id=row["source_full_record_id"],
+                        precursor_start_1based=int(precursor_span.group(1)),
+                        precursor_end_1based=int(precursor_span.group(2)),
                         boundary_method=row["boundary_method"],
                         boundary_source=row["boundary_source"],
                         source_accession=row["source_accession"],
@@ -310,6 +406,52 @@ class MHCRegistry:
         return tuple(candidates)
 
     @staticmethod
+    def _load_fallback_pbr_sequences(
+        path: object,
+    ) -> Tuple[FallbackPBRSequenceCandidate, ...]:
+        candidates = []
+        with path.open("r", encoding="utf-8", newline="") as handle:
+            for row in csv.DictReader(handle):
+                af3_span = re.fullmatch(r"([0-9]+)-([0-9]+)", row["af3_span_1based"])
+                if af3_span is None:
+                    raise MHCTransformError(
+                        f"invalid fallback PBR span: {row['af3_span_1based']}"
+                    )
+                candidates.append(
+                    FallbackPBRSequenceCandidate(
+                        record_id=row["record_id"],
+                        allele=row["allele"],
+                        aliases=_split_aliases(row["aliases"]),
+                        species=row["species"],
+                        mhc_class=row["mhc_class"],
+                        chain_role=row["chain_role"],
+                        locus=row["locus"],
+                        definition_id=row["representation"],
+                        sequence=row["sequence"],
+                        source_af3_record_id=row["source_af3_record_id"],
+                        af3_start_1based=int(af3_span.group(1)),
+                        af3_end_1based=int(af3_span.group(2)),
+                        evidence_level=row["evidence_level"],
+                        observed_spans_1based=row["observed_spans_1based"],
+                        imputed_spans_1based=row["imputed_spans_1based"],
+                        observed_residue_count=int(row["observed_residue_count"]),
+                        imputed_residue_count=int(row["imputed_residue_count"]),
+                        source_record_ids=_split_aliases(row["source_record_ids"]),
+                        template_record_id=row["template_record_id"],
+                        template_allele=row["template_allele"],
+                        target_pseudo_record_id=row["target_pseudo_record_id"],
+                        pseudo_distance=int(row["pseudo_distance"]),
+                        unknown_pseudo_positions=tuple(
+                            int(value)
+                            for value in row["unknown_pseudo_positions"].split(";")
+                            if value
+                        ),
+                        quality_flags=_split_aliases(row["quality_flags"]),
+                    )
+                )
+        return tuple(candidates)
+
+    @staticmethod
     def _filter_sequence_candidates(
         candidates: Iterable[SequenceCandidate],
         *,
@@ -350,6 +492,32 @@ class MHCRegistry:
             candidate
             for candidate in candidates
             if candidate.definition_id == definition_id
+            and (expected_class is None or candidate.mhc_class == expected_class)
+            and (expected_species is None or candidate.species == expected_species)
+        )
+        return _deduplicate(filtered)  # type: ignore[return-value]
+
+    @staticmethod
+    def _filter_pbr_candidates(
+        candidates: Iterable[PBRSequenceCandidate],
+        *,
+        mhc_class: str | None,
+        species: str | None,
+        definition_id: str | None,
+    ) -> Tuple[PBRSequenceCandidate, ...]:
+        if definition_id is not None and definition_id not in PBR_DEFINITIONS:
+            raise MHCTransformError(
+                "unsupported PBR definition_id: "
+                f"{definition_id}; expected one of {', '.join(PBR_DEFINITIONS)}"
+            )
+        expected_class = normalize_mhc_class(mhc_class) if mhc_class else None
+        expected_species = species.lower().strip() if species else None
+        if expected_species and expected_species not in {"human", "mouse"}:
+            raise MHCTransformError("species must be human or mouse")
+        filtered = (
+            candidate
+            for candidate in candidates
+            if (definition_id is None or candidate.definition_id == definition_id)
             and (expected_class is None or candidate.mhc_class == expected_class)
             and (expected_species is None or candidate.species == expected_species)
         )
@@ -770,6 +938,202 @@ class MHCRegistry:
             ),
         )
 
+    def allele_to_pbr(
+        self,
+        allele: str,
+        *,
+        mhc_class: str | None = None,
+        species: str | None = None,
+        definition_id: str | None = None,
+        allow_two_field_projection: bool = False,
+        fallback: str = "none",
+        allow_expression_qualified: bool = False,
+    ) -> QueryResult:
+        """Convert a chain allele/name to a contiguous peptide-binding region."""
+
+        fallback_policy = normalize_fallback_policy(fallback)
+        query_key = exact_name_key(allele)
+        fallback_key = query_key
+        exact = self._pbr_name_index.get(query_key, ())
+        candidates = self._filter_pbr_candidates(
+            exact,
+            mhc_class=mhc_class,
+            species=species,
+            definition_id=definition_id,
+        )
+        notes: List[str] = []
+        projected = False
+        deposited_full = self._sequence_name_index.get(query_key, ())
+        exclusions = self._af3_exclusion_index.get(query_key, ())
+        if (
+            not candidates
+            and not exact
+            and not deposited_full
+            and not exclusions
+            and allow_two_field_projection
+        ):
+            two_field = two_field_hla(allele)
+            if two_field and exact_name_key(two_field) != query_key:
+                candidates = self._filter_pbr_candidates(
+                    self._pbr_name_index.get(exact_name_key(two_field), ()),
+                    mhc_class=mhc_class,
+                    species=species,
+                    definition_id=definition_id,
+                )
+                if candidates:
+                    projected = True
+                    fallback_key = exact_name_key(two_field)
+                    notes.append(
+                        "No exact deposited name was found; explicit two-field projection was enabled, so all matching PBR candidates are returned."
+                    )
+        if not candidates:
+            reasons = sorted({item["reason"] for item in exclusions})
+            if reasons:
+                notes.extend(f"Not strict-PBR-ready: {reason}" for reason in reasons)
+            elif deposited_full:
+                notes.append(
+                    "An exact deposited protein name exists but is partial or otherwise lacks a strict PBR; two-field projection is suppressed."
+                )
+
+        fallback_candidates: Tuple[object, ...] = ()
+        if not candidates and fallback_policy != "none":
+            fallback_candidates = self._filter_fallback_candidates(
+                self._fallback_pbr_name_index.get(fallback_key, ()),
+                mhc_class=mhc_class,
+                species=species,
+                fallback_policy=fallback_policy,
+                allow_expression_qualified=allow_expression_qualified,
+            )
+            if definition_id is not None:
+                fallback_candidates = tuple(
+                    candidate
+                    for candidate in fallback_candidates
+                    if getattr(candidate, "definition_id") == definition_id
+                )
+            if fallback_candidates:
+                notes.append(
+                    "Strict PBR unavailable; an explicitly labelled PBR fallback/construct was returned."
+                )
+            elif not allow_expression_qualified:
+                unfiltered = self._filter_fallback_candidates(
+                    self._fallback_pbr_name_index.get(fallback_key, ()),
+                    mhc_class=mhc_class,
+                    species=species,
+                    fallback_policy=fallback_policy,
+                    allow_expression_qualified=True,
+                )
+                if definition_id is not None:
+                    unfiltered = tuple(
+                        candidate
+                        for candidate in unfiltered
+                        if getattr(candidate, "definition_id") == definition_id
+                    )
+                if unfiltered:
+                    notes.append(
+                        "PBR fallback exists but the allele has an expression suffix; set allow_expression_qualified=True to model it explicitly."
+                    )
+        returned_candidates = fallback_candidates or candidates
+        evidence_levels = {
+            getattr(candidate, "evidence_level", "source_exact")
+            for candidate in returned_candidates
+        }
+        representations = {
+            getattr(candidate, "definition_id") for candidate in returned_candidates
+        }
+        return QueryResult(
+            query=allele,
+            representation=(
+                next(iter(representations))
+                if len(representations) == 1
+                else "mixed_peptide_binding_region"
+            ),
+            status=result_status(len(returned_candidates), projected=projected),
+            candidates=returned_candidates,
+            notes=tuple(notes),
+            fallback_used=fallback_policy if fallback_candidates else "none",
+            evidence=(
+                next(iter(evidence_levels))
+                if len(evidence_levels) == 1
+                else ("mixed" if evidence_levels else "source_exact")
+            ),
+        )
+
+    def pbr_to_alleles(
+        self,
+        sequence: str,
+        *,
+        mhc_class: str | None = None,
+        species: str | None = None,
+        definition_id: str | None = None,
+        include_fallback: str = "none",
+    ) -> QueryResult:
+        """Return strict exact and opt-in compatible names for a PBR chain."""
+
+        fallback_policy = normalize_fallback_policy(include_fallback)
+        normalized = normalize_sequence(sequence)
+        candidates = self._filter_pbr_candidates(
+            self._pbr_value_index.get(normalized, ()),
+            mhc_class=mhc_class,
+            species=species,
+            definition_id=definition_id,
+        )
+        fallback_candidates: Tuple[object, ...] = ()
+        if fallback_policy != "none":
+            fallback_candidates = self._filter_fallback_candidates(
+                self._fallback_pbr_value_index.get(normalized, ()),
+                mhc_class=mhc_class,
+                species=species,
+                fallback_policy=fallback_policy,
+                allow_expression_qualified=True,
+                prefer_best=False,
+            )
+            if definition_id is not None:
+                fallback_candidates = tuple(
+                    candidate
+                    for candidate in fallback_candidates
+                    if getattr(candidate, "definition_id") == definition_id
+                )
+        returned_candidates = _deduplicate((*candidates, *fallback_candidates))
+        reverse_status = result_status(len(returned_candidates))
+        notes: Tuple[str, ...] = ()
+        if fallback_candidates:
+            reverse_status = (
+                "compatible_unique"
+                if len(returned_candidates) == 1
+                else "compatible_ambiguous"
+            )
+            notes = (
+                "Sequence matches an engineered/partial PBR fallback construct; this is compatibility, not proof of an exact biological allele.",
+            )
+        evidence_levels = {
+            getattr(candidate, "evidence_level", "source_exact")
+            for candidate in returned_candidates
+        }
+        representations = {
+            getattr(candidate, "definition_id") for candidate in returned_candidates
+        }
+        return QueryResult(
+            query=normalized,
+            representation=(
+                "fallback_pbr_construct_match"
+                if fallback_candidates
+                else (
+                    next(iter(representations))
+                    if len(representations) == 1
+                    else "mixed_peptide_binding_region"
+                )
+            ),
+            status=reverse_status,
+            candidates=returned_candidates,
+            notes=notes,
+            fallback_used=fallback_policy if fallback_candidates else "none",
+            evidence=(
+                next(iter(evidence_levels))
+                if len(evidence_levels) == 1
+                else ("mixed" if evidence_levels else "source_exact")
+            ),
+        )
+
     def allele_to_pseudo(
         self,
         allele_or_pair: str,
@@ -825,12 +1189,20 @@ class MHCRegistry:
                 continue
             candidates.append(candidate)
         candidates = _deduplicate(candidates)
+        evidence_levels = {
+            candidate.evidence_level for candidate in candidates
+        }
         return QueryResult(
             query=allele_or_pair,
             representation=definition_id,
             status=result_status(len(candidates), projected=projected),
             candidates=candidates,
             notes=tuple(notes),
+            evidence=(
+                next(iter(evidence_levels))
+                if len(evidence_levels) == 1
+                else ("mixed" if evidence_levels else "source_exact")
+            ),
         )
 
     def pseudo_to_alleles(
@@ -862,11 +1234,19 @@ class MHCRegistry:
                 continue
             candidates.append(candidate)
         candidates = _deduplicate(candidates)
+        evidence_levels = {
+            candidate.evidence_level for candidate in candidates
+        }
         return QueryResult(
             query=normalized,
             representation=definition_id,
             status=result_status(len(candidates)),
             candidates=candidates,
+            evidence=(
+                next(iter(evidence_levels))
+                if len(evidence_levels) == 1
+                else ("mixed" if evidence_levels else "source_exact")
+            ),
         )
 
     def _pair_specs(self, name: str, mhc_class: str) -> Tuple[Tuple[str, str, str], ...]:
@@ -1190,15 +1570,152 @@ class MHCRegistry:
             ),
         )
 
+    def molecule_to_pbr_chains(
+        self,
+        name: str,
+        *,
+        mhc_class: str,
+        species: str | None = None,
+        allow_two_field_projection: bool = False,
+        fallback: str = "none",
+        allow_expression_qualified: bool = False,
+    ) -> QueryResult:
+        """Resolve an MHC molecule into peptide-binding structural regions.
+
+        MHC-I returns only the heavy-chain alpha1+alpha2 region (no B2M).
+        MHC-II returns alpha1 and beta1 as two independent protein chains.
+        """
+
+        expected_class = normalize_mhc_class(mhc_class)
+        fallback_policy = normalize_fallback_policy(fallback)
+        notes: List[str] = []
+        molecules: List[PBRMoleculeCandidate] = []
+        projected = False
+        if expected_class == "I":
+            heavy = self.allele_to_pbr(
+                name,
+                mhc_class="I",
+                species=species,
+                allow_two_field_projection=allow_two_field_projection,
+                fallback=fallback_policy,
+                allow_expression_qualified=allow_expression_qualified,
+            )
+            projected = heavy.status.startswith("projected_")
+            notes.extend(f"heavy chain: {note}" for note in heavy.notes)
+            for heavy_candidate in heavy.candidates:
+                if heavy_candidate.chain_role != "heavy":
+                    continue
+                molecules.append(
+                    PBRMoleculeCandidate(
+                        canonical_name=heavy_candidate.allele,
+                        species=heavy_candidate.species,
+                        mhc_class="I",
+                        chains=(heavy_candidate,),
+                    )
+                )
+        else:
+            specs = self._pair_specs(name, expected_class)
+            if len(re.split(r"\s*(?:/|\+)\s*", name)) == 1 and "DRB" in name.upper():
+                notes.append(
+                    "DRB shorthand was paired with the conventional HLA-DRA*01:01 alpha chain."
+                )
+            for canonical_name, alpha_name, beta_name in specs:
+                alpha = self.allele_to_pbr(
+                    alpha_name,
+                    mhc_class="II",
+                    species=species,
+                    allow_two_field_projection=allow_two_field_projection,
+                    fallback=fallback_policy,
+                    allow_expression_qualified=allow_expression_qualified,
+                )
+                beta = self.allele_to_pbr(
+                    beta_name,
+                    mhc_class="II",
+                    species=species,
+                    allow_two_field_projection=allow_two_field_projection,
+                    fallback=fallback_policy,
+                    allow_expression_qualified=allow_expression_qualified,
+                )
+                projected = projected or alpha.status.startswith("projected_")
+                projected = projected or beta.status.startswith("projected_")
+                notes.extend(f"alpha chain: {note}" for note in alpha.notes)
+                notes.extend(f"beta chain: {note}" for note in beta.notes)
+                for alpha_candidate, beta_candidate in product(
+                    alpha.candidates, beta.candidates
+                ):
+                    if alpha_candidate.species != beta_candidate.species:
+                        continue
+                    if (
+                        alpha_candidate.chain_role != "alpha"
+                        or beta_candidate.chain_role != "beta"
+                    ):
+                        continue
+                    alpha_family = _mhcii_family(alpha_candidate.locus, "alpha")
+                    beta_family = _mhcii_family(beta_candidate.locus, "beta")
+                    if not alpha_family or alpha_family != beta_family:
+                        continue
+                    molecules.append(
+                        PBRMoleculeCandidate(
+                            canonical_name=canonical_name,
+                            species=alpha_candidate.species,
+                            mhc_class="II",
+                            chains=(alpha_candidate, beta_candidate),
+                        )
+                    )
+
+        unique = {}
+        for molecule in molecules:
+            key = (
+                molecule.canonical_name,
+                tuple(chain.record_id for chain in molecule.chains),
+            )
+            unique[key] = molecule
+        candidates = tuple(unique[key] for key in sorted(unique))
+        evidence_levels = {
+            getattr(chain, "evidence_level", "source_exact")
+            for molecule in candidates
+            for chain in molecule.chains
+        }
+        fallback_returned = any(
+            isinstance(chain, FallbackPBRSequenceCandidate)
+            for molecule in candidates
+            for chain in molecule.chains
+        )
+        return QueryResult(
+            query=name,
+            representation=(
+                "peptide_binding_region_fallback_molecule"
+                if fallback_returned
+                else "peptide_binding_region_molecule"
+            ),
+            status=result_status(len(candidates), projected=projected),
+            candidates=candidates,
+            notes=tuple(dict.fromkeys(notes)),
+            fallback_used=fallback_policy if fallback_returned else "none",
+            evidence=(
+                next(iter(evidence_levels))
+                if len(evidence_levels) == 1
+                else ("mixed" if evidence_levels else "source_exact")
+            ),
+        )
+
     def stats(self) -> Dict[str, object]:
         return {
             "sequence_records": len(self._sequences),
             "complete_sequence_records": sum(item.is_complete for item in self._sequences),
             "af3_sequence_records": len(self._af3_sequences),
+            "pbr_sequence_records": len(self._pbr_sequences),
             "pseudo_records": len(self._pseudos),
+            "pseudo_official_supported_records": sum(
+                item.official_support for item in self._pseudos
+            ),
+            "pseudo_by_evidence": dict(
+                sorted(Counter(item.evidence_level for item in self._pseudos).items())
+            ),
             "pair_records": len(self._pairs),
             "fallback_sequence_records": len(self._fallback_sequences),
             "fallback_af3_records": len(self._fallback_af3_sequences),
+            "fallback_pbr_records": len(self._fallback_pbr_sequences),
             "fallback_by_evidence": dict(
                 sorted(
                     Counter(
@@ -1206,6 +1723,7 @@ class MHCRegistry:
                         for item in (
                             *self._fallback_sequences,
                             *self._fallback_af3_sequences,
+                            *self._fallback_pbr_sequences,
                         )
                     ).items()
                 )
@@ -1275,6 +1793,32 @@ class MHCRegistry:
                     allow_expression_qualified=allow_expression_qualified,
                 ),
             }
+            pbr_calls = {
+                "strict_pbr": self.allele_to_pbr(
+                    name, mhc_class="I", species=species
+                ),
+                "partial_pbr": self.allele_to_pbr(
+                    name,
+                    mhc_class="I",
+                    species=species,
+                    fallback="partial",
+                    allow_expression_qualified=allow_expression_qualified,
+                ),
+                "imputed_pbr": self.allele_to_pbr(
+                    name,
+                    mhc_class="I",
+                    species=species,
+                    fallback="imputed",
+                    allow_expression_qualified=allow_expression_qualified,
+                ),
+                "pseudo_scaffold_pbr": self.allele_to_pbr(
+                    name,
+                    mhc_class="I",
+                    species=species,
+                    fallback="pseudo-scaffold",
+                    allow_expression_qualified=allow_expression_qualified,
+                ),
+            }
         else:
             full_calls = {
                 "strict_full": self.molecule_to_chains(
@@ -1319,6 +1863,32 @@ class MHCRegistry:
                     allow_expression_qualified=allow_expression_qualified,
                 ),
             }
+            pbr_calls = {
+                "strict_pbr": self.molecule_to_pbr_chains(
+                    name, mhc_class="II", species=species
+                ),
+                "partial_pbr": self.molecule_to_pbr_chains(
+                    name,
+                    mhc_class="II",
+                    species=species,
+                    fallback="partial",
+                    allow_expression_qualified=allow_expression_qualified,
+                ),
+                "imputed_pbr": self.molecule_to_pbr_chains(
+                    name,
+                    mhc_class="II",
+                    species=species,
+                    fallback="imputed",
+                    allow_expression_qualified=allow_expression_qualified,
+                ),
+                "pseudo_scaffold_pbr": self.molecule_to_pbr_chains(
+                    name,
+                    mhc_class="II",
+                    species=species,
+                    fallback="pseudo-scaffold",
+                    allow_expression_qualified=allow_expression_qualified,
+                ),
+            }
 
         def summarize(result: QueryResult) -> Dict[str, object]:
             return {
@@ -1336,5 +1906,6 @@ class MHCRegistry:
             "pseudo": summarize(pseudo),
             **{key: summarize(value) for key, value in full_calls.items()},
             **{key: summarize(value) for key, value in af3_calls.items()},
+            **{key: summarize(value) for key, value in pbr_calls.items()},
         }
 

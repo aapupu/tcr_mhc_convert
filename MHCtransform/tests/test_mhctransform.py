@@ -1,6 +1,12 @@
 import unittest
 
 from mhctransform import MHCRegistry, MHCTransformError
+from mhctransform.fallback import expand_positions
+from mhctransform.pbr import (
+    PBR_I_DEFINITION,
+    PBR_II_ALPHA_DEFINITION,
+    PBR_II_BETA_DEFINITION,
+)
 from mhctransform.registry import (
     AF3_DEFINITION,
     PSEUDO_I_DEFINITION,
@@ -16,6 +22,7 @@ class RegistryTests(unittest.TestCase):
     def test_class_i_golden_pseudosequences(self):
         expected = {
             "HLA-A*02:01": "YFAMYGEKVAHTHVDTLYVRYHYYTWAVLAYTWY",
+            "HLA-C*03:46": "YYAGYREKYRQTDVSNLYIRYDYYTWAELAYLWY",
             "H-2-Kb": "YVEYYREKAGNSFVDTLYIVSQYYTWAELAYTWY",
         }
         for name, pseudo in expected.items():
@@ -25,6 +32,32 @@ class RegistryTests(unittest.TestCase):
                 )
                 self.assertEqual(result.status, "exact_unique")
                 self.assertEqual(result.candidates[0].pseudo_sequence, pseudo)
+
+    def test_netmhc_historical_q_names_keep_current_ipd_canonical(self):
+        full = self.registry.allele_to_sequence(
+            "HLA-DQA1*01:07", mhc_class="II"
+        )
+        self.assertEqual(full.status, "exact_unique")
+        self.assertEqual(full.candidates[0].allele, "HLA-DQA1*01:07Q")
+
+        dq = self.registry.allele_to_pseudo(
+            "HLA-DQA1*01:07/HLA-DQB1*02:01",
+            mhc_class="II",
+            definition_id=PSEUDO_II_DEFINITION,
+        )
+        dr = self.registry.allele_to_pseudo(
+            "HLA-DRB1*15:13",
+            mhc_class="II",
+            definition_id=PSEUDO_II_DEFINITION,
+        )
+        self.assertEqual(dq.status, "exact_unique")
+        self.assertEqual(dr.status, "exact_unique")
+        self.assertEqual(dq.candidates[0].alpha_allele, "HLA-DQA1*01:07Q")
+        self.assertEqual(dr.candidates[0].beta_allele, "HLA-DRB1*15:13Q")
+        self.assertIn(
+            "official_name_maps_to_current_q_suffix",
+            dq.candidates[0].quality_flags,
+        )
 
     def test_class_ii_golden_pseudosequences(self):
         expected = {
@@ -38,6 +71,97 @@ class RegistryTests(unittest.TestCase):
                 )
                 self.assertEqual(result.status, "exact_unique")
                 self.assertEqual(result.candidates[0].pseudo_sequence, pseudo)
+
+    def test_pseudo_provenance_separates_validation_from_derivation(self):
+        validated = self.registry.allele_to_pseudo(
+            "HLA-A*02:402",
+            mhc_class="I",
+            definition_id=PSEUDO_I_DEFINITION,
+        )
+        self.assertEqual(validated.status, "exact_unique")
+        validated_candidate = validated.candidates[0]
+        self.assertEqual(
+            validated_candidate.evidence_level,
+            "derived_contact_complete_partial",
+        )
+        self.assertTrue(validated_candidate.official_support)
+        self.assertEqual(
+            validated_candidate.validation_status, "official_training_exact"
+        )
+        self.assertIn("IPD-IMGT/HLA", validated_candidate.source_version)
+        self.assertTrue(validated_candidate.source_record_ids)
+        self.assertEqual(validated.evidence, "derived_contact_complete_partial")
+
+        derived = self.registry.allele_to_pseudo(
+            "HLA-A*01:19",
+            mhc_class="I",
+            definition_id=PSEUDO_I_DEFINITION,
+        )
+        self.assertEqual(derived.status, "exact_unique")
+        derived_candidate = derived.candidates[0]
+        self.assertEqual(
+            derived_candidate.evidence_level, "derived_contact_complete_partial"
+        )
+        self.assertTrue(derived_candidate.official_support)
+        self.assertEqual(
+            derived_candidate.validation_status,
+            "derived_contact_complete_partial",
+        )
+        self.assertTrue(derived_candidate.source_record_ids)
+        self.assertNotIn("X", derived_candidate.pseudo_sequence)
+        self.assertEqual(derived.evidence, "derived_contact_complete_partial")
+
+        self.assertFalse(
+            any(
+                candidate.evidence_level == "official_reference"
+                for candidate in self.registry._pseudos
+            )
+        )
+
+    def test_expanded_netmhciipan_supported_pair_is_queryable_and_reversible(self):
+        name = "HLA-DQA1*01:01/HLA-DQB1*03:105"
+        forward = self.registry.allele_to_pseudo(
+            name,
+            mhc_class="II",
+            definition_id=PSEUDO_II_DEFINITION,
+        )
+        self.assertEqual(forward.status, "exact_unique")
+        candidate = forward.candidates[0]
+        self.assertTrue(candidate.official_support)
+        self.assertEqual(candidate.evidence_level, "derived_exact_pbr")
+        self.assertEqual(
+            candidate.validation_status,
+            "official_supported_component_composition",
+        )
+        self.assertEqual(len(candidate.pseudo_sequence), 34)
+        self.assertEqual(len(candidate.source_record_ids), 2)
+        self.assertIn(
+            "computational_pairing_not_haplotype_evidence",
+            candidate.quality_flags,
+        )
+
+        reverse = self.registry.pseudo_to_alleles(
+            candidate.pseudo_sequence,
+            mhc_class="II",
+            definition_id=PSEUDO_II_DEFINITION,
+        )
+        self.assertIn(name, {item.canonical_name for item in reverse.candidates})
+
+    def test_contact_complete_partial_pseudos_have_no_imputed_contacts(self):
+        candidates = [
+            candidate
+            for candidate in self.registry._pseudos
+            if candidate.evidence_level == "derived_contact_complete_partial"
+        ]
+        self.assertGreater(len(candidates), 0)
+        for candidate in candidates:
+            with self.subTest(name=candidate.canonical_name):
+                self.assertEqual(len(candidate.pseudo_sequence), 34)
+                self.assertNotIn("X", candidate.pseudo_sequence)
+                self.assertTrue(candidate.source_record_ids)
+                self.assertFalse(
+                    any("imput" in flag.lower() for flag in candidate.quality_flags)
+                )
 
     def test_higher_field_hla_name_falls_back_without_selecting_a_full_sequence(self):
         result = self.registry.allele_to_pseudo(
@@ -656,6 +780,158 @@ class RegistryTests(unittest.TestCase):
                 continue
             self.assertEqual(value["status"], "not_found", key)
 
+    def test_pbr_golden_boundaries_and_parent_spans(self):
+        expected = {
+            "HLA-A*02:01": ("I", PBR_I_DEFINITION, 182),
+            "HLA-DRA*01:01": ("II", PBR_II_ALPHA_DEFINITION, 84),
+            "HLA-DRB1*15:01": ("II", PBR_II_BETA_DEFINITION, 95),
+            "HLA-DQA1*01:01": ("II", PBR_II_ALPHA_DEFINITION, 96),
+            "HLA-DPB1*01:01": ("II", PBR_II_BETA_DEFINITION, 92),
+        }
+        af3_by_id = {
+            candidate.record_id: candidate for candidate in self.registry._af3_sequences
+        }
+        for name, (mhc_class, definition, length) in expected.items():
+            with self.subTest(name=name):
+                result = self.registry.allele_to_pbr(name, mhc_class=mhc_class)
+                self.assertEqual(result.status, "exact_unique")
+                candidate = result.candidates[0]
+                self.assertEqual(candidate.definition_id, definition)
+                self.assertEqual(len(candidate.sequence), length)
+                parent = af3_by_id[candidate.source_af3_record_id]
+                self.assertEqual(
+                    candidate.sequence,
+                    parent.sequence[
+                        candidate.af3_start_1based - 1 : candidate.af3_end_1based
+                    ],
+                )
+                self.assertEqual(
+                    candidate.precursor_end_1based
+                    - candidate.precursor_start_1based
+                    + 1,
+                    length,
+                )
+
+    def test_pbr_molecule_keeps_biological_chains_separate(self):
+        class_i = self.registry.molecule_to_pbr_chains(
+            "HLA-A*02:01", mhc_class="I"
+        )
+        self.assertEqual(class_i.status, "exact_unique")
+        self.assertEqual(len(class_i.candidates[0].chains), 1)
+        self.assertEqual(class_i.candidates[0].chains[0].chain_role, "heavy")
+
+        class_ii = self.registry.molecule_to_pbr_chains(
+            "HLA-DRA*01:01/HLA-DRB1*15:01", mhc_class="II"
+        )
+        self.assertEqual(class_ii.status, "exact_unique")
+        self.assertEqual(
+            [chain.chain_role for chain in class_ii.candidates[0].chains],
+            ["alpha", "beta"],
+        )
+        self.assertEqual(
+            [len(chain.sequence) for chain in class_ii.candidates[0].chains],
+            [84, 95],
+        )
+
+    def test_reference_pseudos_are_exact_projections_of_the_pbr_chains(self):
+        definitions = self.registry.metadata["pseudo_definitions"]
+
+        class_i_pbr = self.registry.allele_to_pbr(
+            "HLA-A*02:01", mhc_class="I"
+        ).candidates[0]
+        class_i_positions = definitions[PSEUDO_I_DEFINITION][
+            "mature_reference_positions_1_based"
+        ]
+        class_i_projection = "".join(
+            class_i_pbr.sequence[position - 1] for position in class_i_positions
+        )
+        class_i_pseudo = self.registry.allele_to_pseudo(
+            "HLA-A*02:01",
+            mhc_class="I",
+            definition_id=PSEUDO_I_DEFINITION,
+        ).candidates[0]
+        self.assertEqual(class_i_projection, class_i_pseudo.pseudo_sequence)
+
+        class_ii_pbr = self.registry.molecule_to_pbr_chains(
+            "HLA-DRA*01:01/HLA-DRB1*15:01", mhc_class="II"
+        ).candidates[0]
+        alpha_positions = definitions[PSEUDO_II_DEFINITION][
+            "alpha_mature_reference_positions_1_based"
+        ]
+        beta_positions = definitions[PSEUDO_II_DEFINITION][
+            "beta_mature_reference_positions_1_based"
+        ]
+        class_ii_projection = "".join(
+            class_ii_pbr.chains[0].sequence[position - 1]
+            for position in alpha_positions
+        ) + "".join(
+            class_ii_pbr.chains[1].sequence[position - 1]
+            for position in beta_positions
+        )
+        class_ii_pseudo = self.registry.allele_to_pseudo(
+            "HLA-DRA*01:01/HLA-DRB1*15:01",
+            mhc_class="II",
+            definition_id=PSEUDO_II_DEFINITION,
+        ).candidates[0]
+        self.assertEqual(class_ii_projection, class_ii_pseudo.pseudo_sequence)
+
+    def test_pbr_fallback_inherits_af3_evidence_and_remaps_spans(self):
+        af3 = self.registry.allele_to_af3(
+            "HLA-B*08:03", mhc_class="I", fallback="imputed"
+        ).candidates[0]
+        result = self.registry.allele_to_pbr(
+            "HLA-B*08:03", mhc_class="I", fallback="imputed"
+        )
+        self.assertEqual(result.status, "exact_unique")
+        candidate = result.candidates[0]
+        self.assertEqual(candidate.source_af3_record_id, af3.record_id)
+        self.assertEqual(candidate.sequence, af3.sequence[:182])
+        self.assertEqual(candidate.evidence_level, af3.evidence_level)
+        observed = set(expand_positions(candidate.observed_spans_1based))
+        imputed = set(expand_positions(candidate.imputed_spans_1based))
+        self.assertFalse(observed & imputed)
+        self.assertEqual(observed | imputed, set(range(1, 183)))
+        self.assertEqual(candidate.observed_residue_count, len(observed))
+        self.assertEqual(candidate.imputed_residue_count, len(imputed))
+
+    def test_pbr_reverse_fallback_is_explicitly_compatible(self):
+        strict = self.registry.allele_to_pbr("HLA-A*02:01", mhc_class="I")
+        reverse = self.registry.pbr_to_alleles(
+            strict.candidates[0].sequence,
+            mhc_class="I",
+            definition_id=PBR_I_DEFINITION,
+        )
+        self.assertTrue(reverse.status.startswith("exact_"))
+
+        fallback = self.registry.allele_to_pbr(
+            "HLA-B*08:03", mhc_class="I", fallback="imputed"
+        )
+        hidden = self.registry.pbr_to_alleles(
+            fallback.candidates[0].sequence, mhc_class="I"
+        )
+        compatible = self.registry.pbr_to_alleles(
+            fallback.candidates[0].sequence,
+            mhc_class="I",
+            include_fallback="imputed",
+        )
+        self.assertNotIn(
+            "HLA-B*08:03", {candidate.allele for candidate in hidden.candidates}
+        )
+        self.assertTrue(compatible.status.startswith("compatible_"))
+
+    def test_every_strict_pbr_is_a_contiguous_af3_subsequence(self):
+        af3_by_id = {
+            candidate.record_id: candidate for candidate in self.registry._af3_sequences
+        }
+        for candidate in self.registry._pbr_sequences:
+            parent = af3_by_id[candidate.source_af3_record_id]
+            self.assertEqual(candidate.af3_start_1based, 1)
+            self.assertEqual(
+                candidate.sequence,
+                parent.sequence[: candidate.af3_end_1based],
+                candidate.allele,
+            )
+
     def test_every_pseudo_name_has_an_explicit_af3_fallback(self):
         for pseudo in self.registry._pseudos:
             af3_result = self.registry.molecule_to_af3_chains(
@@ -673,6 +949,14 @@ class RegistryTests(unittest.TestCase):
             )
             if full_result.status == "not_found":
                 self.fail(f"missing full fallback for {pseudo.canonical_name}")
+            pbr_result = self.registry.molecule_to_pbr_chains(
+                pseudo.canonical_name,
+                mhc_class=pseudo.mhc_class,
+                fallback="pseudo-scaffold",
+                allow_expression_qualified=True,
+            )
+            if pbr_result.status == "not_found":
+                self.fail(f"missing PBR fallback for {pseudo.canonical_name}")
             for molecule in full_result.candidates:
                 for chain in molecule.chains:
                     self.assertNotEqual(

@@ -10,7 +10,7 @@
 
 | 工具 | 主要功能 | 命令行 |
 |---|---|---|
-| [`MHCtransform`](MHCtransform/) | 人/鼠 MHC-I、MHC-II 名称与前体全长、AF3 胞外链、34-aa pseudosequence 的严格双向转换，并提供与严格库隔离、需显式开启的 partial/imputed/pseudo-scaffold 后备；MHC-I 自动配物种匹配 B2M，MHC-II 输出 alpha/beta 双链 | `mhctransform` |
+| [`MHCtransform`](MHCtransform/) | 人/鼠 MHC-I、MHC-II 名称与前体全长、AF3 胞外链、连续肽结合区（PBR）及 34-aa pseudosequence 的严格双向转换，并提供与严格库隔离、需显式开启的后备；MHC-I 自动配物种匹配 B2M，MHC-II 输出 alpha/beta 双链 | `mhctransform` |
 | [`TCRtransform`](TCRtransform/) | 人/鼠 alpha/beta TCR 的 V + CDR3 + J + C 胞外链重建、CDR1/2/2.5/3 注释、CDR3 边界解析和完整链反查 | `tcrtransform` |
 
 两个包运行时都只依赖 Python 标准库，支持 Python 3.9 及以上版本。它们共享一个 GitHub 仓库，但保留独立的 Python 包名、版本、API 和命令行，因此可以单独或一起安装。
@@ -28,7 +28,7 @@ python -m pip install -e ./MHCtransform -e ./TCRtransform
 
 ## 快速示例
 
-### MHC allele -> 前体全长、AF3 链或 34-aa pseudo
+### MHC allele -> 前体全长、肽结合区、AF3 链或 34-aa pseudo
 
 ```bash
 # HLA-A 重链前体
@@ -41,6 +41,13 @@ mhctransform molecule-to-af3 'HLA-A*02:01' --class I
 mhctransform molecule-to-af3 \
   'HLA-DRA*01:01/HLA-DRB1*15:01' --class II
 
+# 连续肽结合结构域：MHC-I 输出一条 alpha1+alpha2 链
+mhctransform molecule-to-pbr 'HLA-A*02:01' --class I
+
+# MHC-II PBR 输出独立的 alpha1 与 beta1 两条链
+mhctransform molecule-to-pbr \
+  'HLA-DRA*01:01/HLA-DRB1*15:01' --class II
+
 # 稀有等位基因：保留 deposited 残基，只补齐 AF3 缺失位置
 mhctransform molecule-to-af3 'HLA-B*08:03' \
   --class I --fallback imputed
@@ -50,7 +57,7 @@ mhctransform allele-to-pseudo 'HLA-A*02:01' \
   --class I --definition netmhcpan-34-v1
 ```
 
-反向查询使用 `full-to-allele`、`af3-to-allele` 和 `pseudo-to-allele`。严格序列会返回全部 exact 候选；后备构建默认不参与反查，只有显式给出 `--include-fallback` 时才返回 `compatible_*` 候选，且不声称生物学精确匹配。详细定义、覆盖范围和审核结论见 [`MHCtransform/README.zh-CN.md`](MHCtransform/README.zh-CN.md) 与 [`MHCtransform/AUDIT_REPORT.md`](MHCtransform/AUDIT_REPORT.md)。
+反向查询使用 `full-to-allele`、`af3-to-allele`、`pbr-to-allele` 和 `pseudo-to-allele`。严格序列会返回全部 exact 候选；后备构建默认不参与反查，只有显式开启时才返回 `compatible_*` 候选，且不声称生物学精确匹配。详细定义、覆盖范围和审核结论见 [`MHCtransform/README.zh-CN.md`](MHCtransform/README.zh-CN.md) 与 [`MHCtransform/AUDIT_REPORT.md`](MHCtransform/AUDIT_REPORT.md)。
 
 ### TCR V/J/CDR3 -> 适合 AF3 的 alpha/beta 胞外链
 
@@ -105,4 +112,4 @@ tcr_mhc_convert/
 
 ## 许可证与数据条款
 
-本仓库代码采用 [MIT License](LICENSE)。每个子项目的 `NOTICE.md` 和数据目录元数据记录了 IPD-IMGT/HLA、UniProt、tcrdist3、PUFFIN 等上游来源、固定版本和校验值。MIT 许可证只适用于本仓库代码，不会重新许可所捆绑或派生的生物参考数据；再分发数据前请核对各上游来源的适用条款。
+本仓库代码采用 [MIT License](LICENSE)。每个子项目的 `NOTICE.md` 和数据目录元数据记录了 IPD-IMGT/HLA、UniProt、tcrdist3、NetMHCpan 4.2f/NetMHCIIpan 4.3k 公开支持清单及旧 PUFFIN 镜像等来源、固定版本和校验值。MIT 许可证只适用于本仓库代码，不会重新许可所捆绑或派生的生物参考数据；本仓库不分发 DTU 可执行程序、模型文件、原始训练归档或 oracle-only pseudo 行。再分发数据前请核对各上游条款。

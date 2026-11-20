@@ -39,9 +39,10 @@
     },
     "af3_excluded_complete": 348,
     "af3_total": 13484,
-    "component_targets": 3913,
-    "fallback_af3": 2097,
-    "fallback_full": 4161,
+    "component_targets": 18079,
+    "fallback_af3": 6626,
+    "fallback_full": 13217,
+    "fallback_pbr": 6626,
     "full_by_species_class": {
       "human/I": 20066,
       "human/II": 9419,
@@ -50,15 +51,27 @@
     },
     "full_complete": 13831,
     "full_total": 29514,
+    "netmhciipan_supported_available": 8956,
+    "netmhciipan_supported_total": 11344,
+    "netmhcpan_supported_available": 8743,
+    "netmhcpan_supported_total": 10395,
     "pairs": 8,
+    "pbr_total": 13482,
+    "pseudo_by_evidence": {
+      "derived_contact_complete_full": 89,
+      "derived_contact_complete_partial": 7223,
+      "derived_exact_pbr": 13560,
+      "legacy_secondary": 3572
+    },
     "pseudo_by_species_class": {
-      "human/I": 2953,
-      "human/II": 5620,
-      "mouse/I": 7,
+      "human/I": 15478,
+      "human/II": 8948,
+      "mouse/I": 10,
       "mouse/II": 8
     },
-    "pseudo_quarantined": 5,
-    "pseudo_total": 8588
+    "pseudo_components": 4386,
+    "pseudo_quarantined": 280,
+    "pseudo_total": 24444
   },
   "fallback_definitions": {
     "af3-soluble-extracellular-imputed-v1": "Synthetic AF3 ectodomain scaffold with deposited-observed and non-observed/imputed spans.",
@@ -73,7 +86,184 @@
     "source_exact_ectodomain": "A deposited fragment that covers every residue of the selected exact extracellular chain; no AF3 residue is imputed.",
     "warning": "A 34-aa pseudosequence is not invertible. Imputed constructs are structural scaffolds, not official allele protein sequences."
   },
-  "generated_on": "2026-11-20",
+  "generated_on": "2026-11-21",
+  "pbr_definitions": {
+    "boundary_policy": "Same-species/locus alignment projection from reviewed UniProt Alpha-1/Beta-1 REGION features for MHC-II and adjacent Alpha-1 plus Alpha-2 REGION features for MHC-I.",
+    "mhci-alpha1-alpha2-v1": {
+      "chains": [
+        "MHC-I heavy"
+      ],
+      "description": "Contiguous mature heavy-chain alpha1+alpha2 domains; B2M is not included."
+    },
+    "mhcii-alpha1-v1": {
+      "chains": [
+        "MHC-II alpha"
+      ],
+      "description": "Contiguous mature MHC-II alpha1 domain."
+    },
+    "mhcii-beta1-v1": {
+      "chains": [
+        "MHC-II beta"
+      ],
+      "description": "Contiguous mature MHC-II beta1 domain."
+    },
+    "reference_records": [
+      {
+        "allele": "HLA-A*03:01",
+        "locus": "A",
+        "pbr_end_1based": 182,
+        "species": "human",
+        "uniprot_accession": "P04439"
+      },
+      {
+        "allele": "HLA-B*07:02",
+        "locus": "B",
+        "pbr_end_1based": 182,
+        "species": "human",
+        "uniprot_accession": "P01889"
+      },
+      {
+        "allele": "HLA-C*07:02",
+        "locus": "C",
+        "pbr_end_1based": 182,
+        "species": "human",
+        "uniprot_accession": "P10321"
+      },
+      {
+        "allele": "HLA-E*01:01",
+        "locus": "E",
+        "pbr_end_1based": 182,
+        "species": "human",
+        "uniprot_accession": "P13747"
+      },
+      {
+        "allele": "HLA-F*01:01",
+        "locus": "F",
+        "pbr_end_1based": 182,
+        "species": "human",
+        "uniprot_accession": "P30511"
+      },
+      {
+        "allele": "HLA-G*01:01",
+        "locus": "G",
+        "pbr_end_1based": 182,
+        "species": "human",
+        "uniprot_accession": "P17693"
+      },
+      {
+        "allele": "HLA-DRA*01:01",
+        "locus": "DRA",
+        "pbr_end_1based": 84,
+        "species": "human",
+        "uniprot_accession": "P01903"
+      },
+      {
+        "allele": "HLA-DRB1*15:01",
+        "locus": "DRB1",
+        "pbr_end_1based": 95,
+        "species": "human",
+        "uniprot_accession": "P01911"
+      },
+      {
+        "allele": "HLA-DRB3*01:01",
+        "locus": "DRB3",
+        "pbr_end_1based": 95,
+        "species": "human",
+        "uniprot_accession": "P79483"
+      },
+      {
+        "allele": "HLA-DRB4*01:01",
+        "locus": "DRB4",
+        "pbr_end_1based": 95,
+        "species": "human",
+        "uniprot_accession": "P13762"
+      },
+      {
+        "allele": "HLA-DRB5*01:01",
+        "locus": "DRB5",
+        "pbr_end_1based": 95,
+        "species": "human",
+        "uniprot_accession": "Q30154"
+      },
+      {
+        "allele": "HLA-DQA1*01:01",
+        "locus": "DQA1",
+        "pbr_end_1based": 96,
+        "species": "human",
+        "uniprot_accession": "P01909"
+      },
+      {
+        "allele": "HLA-DQB1*05:01",
+        "locus": "DQB1",
+        "pbr_end_1based": 94,
+        "species": "human",
+        "uniprot_accession": "P01920"
+      },
+      {
+        "allele": "HLA-DPA1*01:03",
+        "locus": "DPA1",
+        "pbr_end_1based": 87,
+        "species": "human",
+        "uniprot_accession": "P20036"
+      },
+      {
+        "allele": "HLA-DPB1*01:01",
+        "locus": "DPB1",
+        "pbr_end_1based": 92,
+        "species": "human",
+        "uniprot_accession": "P04440"
+      },
+      {
+        "allele": "H-2-Db",
+        "locus": "H2-D1",
+        "pbr_end_1based": 182,
+        "species": "mouse",
+        "uniprot_accession": "P01899"
+      },
+      {
+        "allele": "H-2-Kb",
+        "locus": "H2-K1",
+        "pbr_end_1based": 182,
+        "species": "mouse",
+        "uniprot_accession": "P01901"
+      },
+      {
+        "allele": "H-2-Ld",
+        "locus": "H2-L",
+        "pbr_end_1based": 182,
+        "species": "mouse",
+        "uniprot_accession": "P01897"
+      },
+      {
+        "allele": "H2-Aa*b",
+        "locus": "H2-Aa",
+        "pbr_end_1based": 88,
+        "species": "mouse",
+        "uniprot_accession": "P14434"
+      },
+      {
+        "allele": "H2-Ab1*b",
+        "locus": "H2-Ab1",
+        "pbr_end_1based": 95,
+        "species": "mouse",
+        "uniprot_accession": "P14483"
+      },
+      {
+        "allele": "H2-Ea*d",
+        "locus": "H2-Ea",
+        "pbr_end_1based": 84,
+        "species": "mouse",
+        "uniprot_accession": "P01904"
+      },
+      {
+        "allele": "H2-Eb1*d",
+        "locus": "H2-Eb1",
+        "pbr_end_1based": 90,
+        "species": "mouse",
+        "uniprot_accession": "P01915"
+      }
+    ]
+  },
   "pseudo_definitions": {
     "netmhciipan-34-v1": {
       "alpha_mature_reference_positions_1_based": [
@@ -166,12 +356,248 @@
       "scope_note": "Defined from classical peptide-presenting MHC-I; nonclassical loci/species are extrapolations."
     }
   },
-  "quarantine": {
-    "count": 5,
-    "file": "quarantined_pseudosequences.csv",
-    "rule": "Prefer an explicit current colon-delimited artifact name over a conflicting historical alias; for MHC-II also enforce one modal alpha-15 and beta-19 segment per allele. Ties fail the build."
+  "pseudo_derivation": {
+    "dynamic_pairing_note": "NetMHCIIpan-supported DQ/DP alpha-beta products describe computational support, not population haplotype evidence.",
+    "mhc_i_contact_positions_1based": [
+      7,
+      9,
+      24,
+      45,
+      59,
+      62,
+      63,
+      66,
+      67,
+      69,
+      70,
+      73,
+      74,
+      76,
+      77,
+      80,
+      81,
+      84,
+      95,
+      97,
+      99,
+      114,
+      116,
+      118,
+      143,
+      147,
+      150,
+      152,
+      156,
+      158,
+      159,
+      163,
+      167,
+      171
+    ],
+    "mhc_ii_component_contact_positions_1based": {
+      "DPA1": [
+        12,
+        14,
+        25,
+        27,
+        34,
+        55,
+        56,
+        61,
+        62,
+        64,
+        68,
+        69,
+        71,
+        75,
+        76
+      ],
+      "DPB1": [
+        9,
+        11,
+        13,
+        24,
+        26,
+        28,
+        45,
+        55,
+        65,
+        68,
+        69,
+        72,
+        75,
+        76,
+        79,
+        83,
+        84,
+        87,
+        88
+      ],
+      "DQA1": [
+        11,
+        14,
+        25,
+        27,
+        34,
+        55,
+        56,
+        61,
+        62,
+        64,
+        68,
+        69,
+        71,
+        75,
+        76
+      ],
+      "DQB1": [
+        9,
+        11,
+        13,
+        26,
+        28,
+        30,
+        47,
+        57,
+        67,
+        70,
+        71,
+        74,
+        77,
+        78,
+        81,
+        85,
+        86,
+        89,
+        90
+      ],
+      "DRA": [
+        9,
+        11,
+        22,
+        24,
+        31,
+        52,
+        53,
+        58,
+        59,
+        61,
+        65,
+        66,
+        68,
+        72,
+        73
+      ],
+      "DRB1": [
+        9,
+        11,
+        13,
+        26,
+        28,
+        30,
+        47,
+        57,
+        67,
+        70,
+        71,
+        74,
+        77,
+        78,
+        81,
+        85,
+        86,
+        89,
+        90
+      ],
+      "DRB3": [
+        9,
+        11,
+        13,
+        26,
+        28,
+        30,
+        47,
+        57,
+        67,
+        70,
+        71,
+        74,
+        77,
+        78,
+        81,
+        85,
+        86,
+        89,
+        90
+      ],
+      "DRB4": [
+        9,
+        11,
+        13,
+        26,
+        28,
+        30,
+        47,
+        57,
+        67,
+        70,
+        71,
+        74,
+        77,
+        78,
+        81,
+        85,
+        86,
+        89,
+        90
+      ],
+      "DRB5": [
+        9,
+        11,
+        13,
+        26,
+        28,
+        30,
+        47,
+        57,
+        67,
+        70,
+        71,
+        74,
+        77,
+        78,
+        81,
+        85,
+        86,
+        89,
+        90
+      ]
+    },
+    "mhc_ii_contact_anchors": {
+      "DPA1": "HLA-DPA1*01:03",
+      "DPB1": "HLA-DPB1*01:01",
+      "DQA1": "HLA-DQA1*01:01",
+      "DQB1": "HLA-DQB1*02:01",
+      "DRA": "HLA-DRA*01:01",
+      "DRB1": "HLA-DRB1*15:01",
+      "DRB3": "HLA-DRB3*01:01",
+      "DRB4": "HLA-DRB4*01:01",
+      "DRB5": "HLA-DRB5*01:01"
+    },
+    "priority": [
+      "official training validation of independently reconstructed rows",
+      "derived exact PBR",
+      "contact-complete deposited sequence",
+      "pinned secondary mirror compatibility row"
+    ],
+    "validation_file": "pseudo_validation.json"
   },
-  "schema_version": 3,
+  "quarantine": {
+    "count": 280,
+    "file": "quarantined_pseudosequences.csv",
+    "rule": "Preserve fixed legacy-source conflicts and recompute current secondary-vs-derived conflicts on every overlay build; never silently select two sequences for one canonical name."
+  },
+  "schema_version": 4,
   "sequence_kind": "precursor_full (strict default); partial_deposited_protein (legacy opt-in); af3-soluble-extracellular-v1 (strict mature extracellular chain); source-partial-v1; precursor-imputed-v1; af3-soluble-extracellular-imputed-v1 (all fallback representations require explicit opt-in)",
   "sources": {
     "af3_human_alignments": {
@@ -298,6 +724,26 @@
       "name": "UniProtKB accession batch",
       "sha256": "ab801102d204e11362f236bac1553c3c850dad9abf26e84ad8898ee486d77fa1",
       "url": "https://rest.uniprot.org/"
+    },
+    "netmhc_training_pseudo_validation": {
+      "bundled": false,
+      "netmhciipan_sha256": "daf3b7d693e76d8e8102c374d130467ff1ef7f9311064a730d56a753a3d514b5",
+      "netmhcpan_sha256": "bb8fe764cd187e55d7f83a465eef152419151ad9924825c411ba4e8ed84ef5a7",
+      "purpose": "local validation gate only",
+      "rows_copied_into_registry": false,
+      "upstream_last_modified": "2026-07-06"
+    },
+    "netmhciipan_4_3_supported_names": {
+      "name": "NetMHCIIpan-4.3k public alleles_name.txt",
+      "retrieved_on": "2026-11-20",
+      "sha256": "143930820fcc5d395c78280bb82a07a6c0ee943db2fc3f7ab0f7a78b1cacfcb3",
+      "url": "https://services.healthtech.dtu.dk/services/NetMHCIIpan-4.3/alleles_name.txt"
+    },
+    "netmhcpan_4_2_supported_names": {
+      "name": "NetMHCpan-4.2f public allele.list",
+      "retrieved_on": "2026-11-20",
+      "sha256": "09167ed2e1f372ae732b978e36e7000a15c85cef2d9eae6c484012f3467b8e18",
+      "url": "https://services.healthtech.dtu.dk/services/NetMHCpan-4.2/allele.list"
     },
     "pseudo_i": {
       "commit": "eddf17d972285a89e80e2837adc1ee6308f5b96b",
