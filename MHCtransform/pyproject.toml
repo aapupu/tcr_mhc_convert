@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mhctransform"
-version = "0.2.0"
-description = "Auditable human/mouse MHC full, AF3 extracellular-chain and 34-aa pseudosequence lookup"
+version = "0.3.0"
+description = "Auditable human/mouse MHC exact, partial and imputed AF3/pseudosequence conversion"
 readme = "README.md"
 license = {file = "LICENSE"}
 requires-python = ">=3.9"

@@ -58,11 +58,70 @@ class AF3SequenceCandidate:
 
 
 @dataclass(frozen=True)
+class FallbackSequenceCandidate:
+    """A deposited fragment or explicitly synthetic precursor construct.
+
+    These candidates intentionally live outside :class:`SequenceCandidate` so
+    a partial or imputed construct can never enter the strict full-sequence
+    index by accident.
+    """
+
+    record_id: str
+    allele: str
+    aliases: Tuple[str, ...]
+    species: str
+    mhc_class: str
+    chain_role: str
+    locus: str
+    representation: str
+    sequence: str
+    evidence_level: str
+    observed_spans_1based: str
+    imputed_spans_1based: str
+    observed_residue_count: int
+    imputed_residue_count: int
+    source_record_ids: Tuple[str, ...]
+    template_record_id: str
+    template_allele: str
+    target_pseudo_record_id: str
+    pseudo_distance: int
+    unknown_pseudo_positions: Tuple[int, ...]
+    quality_flags: Tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class FallbackAF3SequenceCandidate:
+    """An exact ectodomain or auditable AF3 fallback construct."""
+
+    record_id: str
+    allele: str
+    aliases: Tuple[str, ...]
+    species: str
+    mhc_class: str
+    chain_role: str
+    locus: str
+    definition_id: str
+    sequence: str
+    evidence_level: str
+    observed_spans_1based: str
+    imputed_spans_1based: str
+    observed_residue_count: int
+    imputed_residue_count: int
+    source_record_ids: Tuple[str, ...]
+    template_record_id: str
+    template_allele: str
+    target_pseudo_record_id: str
+    pseudo_distance: int
+    unknown_pseudo_positions: Tuple[int, ...]
+    quality_flags: Tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class MoleculeCandidate:
     canonical_name: str
     species: str
     mhc_class: str
-    chains: Tuple[SequenceCandidate, ...]
+    chains: Tuple[SequenceCandidate | FallbackSequenceCandidate, ...]
 
 
 @dataclass(frozen=True)
@@ -70,7 +129,7 @@ class AF3MoleculeCandidate:
     canonical_name: str
     species: str
     mhc_class: str
-    chains: Tuple[AF3SequenceCandidate, ...]
+    chains: Tuple[AF3SequenceCandidate | FallbackAF3SequenceCandidate, ...]
 
 
 @dataclass(frozen=True)
@@ -78,7 +137,13 @@ class QueryResult:
     """A non-lossy lookup result.
 
     ``status`` is one of ``exact_unique``, ``exact_ambiguous``,
-    ``projected_unique``, ``projected_ambiguous`` or ``not_found``.
+    ``projected_unique``, ``projected_ambiguous``, ``compatible_unique``,
+    ``compatible_ambiguous`` or ``not_found``. ``compatible_*`` is reserved
+    for reverse matches to partial or engineered fallback representations;
+    it must not be interpreted as proof of a biological allele sequence.
+    For forward fallback queries, ``exact_*`` describes exact name resolution;
+    ``evidence`` and the candidate's ``evidence_level`` describe sequence
+    provenance.
     Ambiguity is deliberate: neither a two-field allele name nor a 34-residue
     pseudosequence is guaranteed to identify exactly one full protein/name.
     Reverse full-sequence results may compact many deposited allele names into
@@ -90,6 +155,8 @@ class QueryResult:
     status: str
     candidates: Tuple[Any, ...] = ()
     notes: Tuple[str, ...] = ()
+    fallback_used: str = "none"
+    evidence: str = "source_exact"
 
     @property
     def candidate_count(self) -> int:
@@ -103,6 +170,8 @@ class QueryResult:
             "candidate_count": self.candidate_count,
             "candidates": [asdict(candidate) for candidate in self.candidates],
             "notes": list(self.notes),
+            "fallback_used": self.fallback_used,
+            "evidence": self.evidence,
         }
 
 

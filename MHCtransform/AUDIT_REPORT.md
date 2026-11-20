@@ -1,20 +1,21 @@
 # MHC 转换审核、TCR 工具对比与 AF3 五链输入建议
 
-审核日期：2026-11-03
+首次审核：2026-11-03；fallback 扩展复核：2026-11-20
 
 ## 结论
 
 旧实现不能作为“人/鼠 MHC-I/MHC-II、全长与 34-aa、双向转换”的正确实现继续使用。它的人 HLA-I 34-aa 数值抽查是对的，但完整范围、命名、反向语义和来源版本不足；MHC-I 默认链不是全长；MHC-II 裁剪表存在系统性错误；mouse 与 MHC-II pseudo 基本缺失。
 
-本轮复核后的新 `MHCtransform` 在其明确声明的覆盖范围内可以通过审核：固定来源、保留歧义、full/pseudo/AF3 三种表示互不混用，支持人/鼠 MHC-I/MHC-II 正反向查询。它不是全 IPD-MHC 物种全集；mouse 是显式 accession 的常用集合，pseudo 是固定版二级 artifact。医学/移植决策仍应回到当前官方数据库验证。
+本轮复核后的新 `MHCtransform` 在其明确声明的覆盖范围内可以通过审核：固定来源、保留歧义、strict full/pseudo/AF3 与 fallback 数据分表分索引，支持人/鼠 MHC-I/MHC-II 正反向查询。它不是全 IPD-MHC 物种全集；mouse 是显式 accession 的常用集合，pseudo 是固定版二级 artifact。医学/移植决策仍应回到当前官方数据库验证。
 
-新实现将三个概念彻底分开：
+新实现将以下概念彻底分开：
 
 1. `precursor_full`：IPD 官方 sequence status 为 `Full` 且无未知残基，或经显式 UniProt accession/fragment 检查确认覆盖完整 coding protein 的记录；其余 deposited protein 仅在 opt-in 时返回；
 2. `af3-soluble-extracellular-v1`：成熟、完整的可溶性胞外链，去 signal/TM/cytoplasmic，但保留膜近端 connector；
 3. 有 `definition_id` 的 34-aa descriptor：用于泛等位模型，不是结构链。
+4. 显式 fallback：`source-partial-v1` 是 deposited fragment；`precursor-imputed-v1` 与 `af3-soluble-extracellular-imputed-v1` 是保留 deposited/pseudo 约束、其余位置由同物种同位点完整模板提供的合成 scaffold。它们不进入 strict 索引，也不是官方等位基因全长序列。
 
-正向查询不任意挑选 first row；反向查询返回全部 exact candidates。
+正向查询不任意挑选 first row。严格反查返回全部 `exact_*` candidates；fallback 构建默认不参与反查，显式纳入后只返回 `compatible_*`，防止把合成序列误写成生物学精确匹配。
 
 ### 本轮发现并修复的高风险问题
 
@@ -23,7 +24,24 @@
 - AF3 builder 曾有两个潜在错误：IPD 可视化 alignment 的 partial/stop-loss 行不能按普通空白切割；UniProt topology 也不能只按长度套到 alignment 第一行。现在 parser 保留对齐列，且每个 locus 必须先找到与 UniProt topology reference **全序列完全相同**的 IPD row，再向 exact deposited allele 投影。
 - AF3 provenance 现在一行对应一个 parent full record 和一个明确 `start-end`，避免 parent ID 列表与 span 列表失配。
 
-离线重建完成后共有 29,514 个 deposited protein records、13,483 个 AF3-ready chain records和 8,588 个 pseudo records；28 项单元测试全部通过，并对每一条 AF3 链验证 `af3 == parent[start-1:end]`。
+离线重建完成后共有 29,514 个 deposited protein records、13,484 个 strict AF3-ready chain records 和 8,588 个 pseudo records；独立 fallback 表另含 4,161 条 full/fragment 记录与 2,097 条 AF3 构建。41 项单元测试全部通过，并对 strict AF3 链验证 `af3 == parent[start-1:end]`；无信号肽的 mouse I-A-s α 链 P14437 另按其 reviewed UniProt 胞外 topology 验证。
+
+## 基于 34-aa pseudo 的全面 fallback 复核
+
+在 bundled pseudo registry 的声明范围内，显式 `pseudo-scaffold` 模式可为全部 8,588 个名称生成 AF3 输入：human MHC-I `2,953/2,953`、human MHC-II `5,620/5,620`、mouse MHC-I `7/7`、mouse MHC-II `8/8`。这表示“存在可追踪的结构 scaffold”，不表示从 34 aa 唯一恢复了真实全长。
+
+最终 fallback 表中，AF3 层包括 67 条 `source_exact_ectodomain`、1,990 条 `partial_guided_imputed` 和 40 条 `pseudo_only_scaffold`；full/fragment 层包括 2,064 条 `source_partial`、2,057 条 `partial_guided_imputed` 与 40 条 `pseudo_only_scaffold`。其中 exact ectodomain 表示 deposited fragment 已覆盖所选 AF3 全区，但不代表它同时覆盖 signal/TM/cytoplasmic precursor。
+
+34-aa 表示本身不可逆：2,953 个 human MHC-I 名称只有 1,574 个唯一 pseudo；5,620 个 human MHC-II 名称只有 1,160 个唯一 pseudo。多个等位基因可共享同一 34mer，且这些位置主要描述 peptide-binding 接触位点，不能确定非 pseudo 区域或全部 TCR 接触面。因此 fallback 采用累积、默认关闭的四级策略：
+
+1. `none`：只返回 strict 官方/可核验序列；
+2. `partial`：仅返回 deposited fragment，绝不标为 full；
+3. `imputed`：有 fragment 时优先保留其对齐残基，再用同物种、同位点、同链型完整模板补齐；
+4. `pseudo-scaffold`：没有 deposited sequence 时，仅用非 `X` pseudo 位点约束同位点模板，是最低证据级别。
+
+所有构建都记录 `evidence_level`、来源记录、模板、observed/imputed 区间、pseudo 距离、未确定的 `X` 位点及质量标志。带 `N/L/S/Q/C/A` 表达后缀的人 HLA 默认仍不能进入 AF3 fallback，除非使用者额外显式确认。
+
+截图中的例子经逐项复核：`HLA-B*08:03`、`HLA-B*45:06`、`HLA-A*02:50`、`HLA-A*03:19` 与 `H-2-Lq` 均使用 deposited partial 引导的 AF3 构建；`H-2-IAs` 的 α 链 P14437 1–195 是 exact extracellular sequence，不需要补全；`H-2-IAq` 与 `H-2-IAu` 仅 α 链需要 imputed，β 链为 exact。合成 full 的模板 parent 必须通过 strict precursor completeness 检查，不能把 P14437 这类 signal-free mature membrane record 冒充 full precursor。
 
 ## 旧版 MHC 部分审核
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import csv
 import json
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from importlib import resources
 from itertools import product
 from pathlib import Path
@@ -15,11 +15,21 @@ from .errors import MHCTransformError
 from .models import (
     AF3MoleculeCandidate,
     AF3SequenceCandidate,
+    FallbackAF3SequenceCandidate,
+    FallbackSequenceCandidate,
     MoleculeCandidate,
     PseudoCandidate,
     QueryResult,
     SequenceCandidate,
     result_status,
+)
+from .fallback import (
+    IMPUTED_AF3_DEFINITION,
+    IMPUTED_EVIDENCE,
+    PSEUDO_SCAFFOLD_EVIDENCE,
+    evidence_allowed,
+    evidence_priority,
+    normalize_fallback_policy,
 )
 from .names import (
     canonical_hla,
@@ -44,6 +54,12 @@ def _deduplicate(candidates: Iterable[object]) -> Tuple[object, ...]:
     for candidate in candidates:
         by_id[getattr(candidate, "record_id")] = candidate
     return tuple(by_id[key] for key in sorted(by_id))
+
+
+def _candidate_evidence(candidate: object) -> str:
+    if isinstance(candidate, SequenceCandidate) and not candidate.is_complete:
+        return "source_partial"
+    return str(getattr(candidate, "evidence_level", "source_exact"))
 
 
 def _mhcii_family(locus: str, role: str) -> str | None:
@@ -96,6 +112,18 @@ class MHCRegistry:
         )
         self._pseudos = self._load_pseudos(data_root.joinpath("pseudo_sequences.csv"))
         self._pairs = self._load_pairs(data_root.joinpath("molecule_pairs.csv"))
+        fallback_full_path = data_root.joinpath("fallback_full_sequences.csv")
+        fallback_af3_path = data_root.joinpath("fallback_af3_sequences.csv")
+        self._fallback_sequences = (
+            self._load_fallback_sequences(fallback_full_path, af3=False)
+            if fallback_full_path.is_file()
+            else ()
+        )
+        self._fallback_af3_sequences = (
+            self._load_fallback_sequences(fallback_af3_path, af3=True)
+            if fallback_af3_path.is_file()
+            else ()
+        )
         with data_root.joinpath("metadata.json").open("r", encoding="utf-8") as handle:
             self.metadata: Mapping[str, object] = json.load(handle)
 
@@ -129,6 +157,28 @@ class MHCRegistry:
         for pair in self._pairs:
             for name in (pair["canonical_name"], *_split_aliases(pair["aliases"])):
                 self._pair_index[exact_name_key(name)].append(pair)
+
+        self._fallback_sequence_name_index: DefaultDict[
+            str, List[FallbackSequenceCandidate]
+        ] = defaultdict(list)
+        self._fallback_sequence_value_index: DefaultDict[
+            str, List[FallbackSequenceCandidate]
+        ] = defaultdict(list)
+        for candidate in self._fallback_sequences:
+            for name in (candidate.allele, *candidate.aliases):
+                self._fallback_sequence_name_index[exact_name_key(name)].append(candidate)
+            self._fallback_sequence_value_index[candidate.sequence].append(candidate)
+
+        self._fallback_af3_name_index: DefaultDict[
+            str, List[FallbackAF3SequenceCandidate]
+        ] = defaultdict(list)
+        self._fallback_af3_value_index: DefaultDict[
+            str, List[FallbackAF3SequenceCandidate]
+        ] = defaultdict(list)
+        for candidate in self._fallback_af3_sequences:
+            for name in (candidate.allele, *candidate.aliases):
+                self._fallback_af3_name_index[exact_name_key(name)].append(candidate)
+            self._fallback_af3_value_index[candidate.sequence].append(candidate)
 
     @staticmethod
     def _load_sequences(path: object) -> Tuple[SequenceCandidate, ...]:
@@ -213,6 +263,53 @@ class MHCRegistry:
             return tuple(dict(row) for row in csv.DictReader(handle))
 
     @staticmethod
+    def _load_fallback_sequences(
+        path: object, *, af3: bool
+    ) -> Tuple[FallbackSequenceCandidate | FallbackAF3SequenceCandidate, ...]:
+        candidates = []
+        with path.open("r", encoding="utf-8", newline="") as handle:
+            for row in csv.DictReader(handle):
+                common = {
+                    "record_id": row["record_id"],
+                    "allele": row["allele"],
+                    "aliases": _split_aliases(row["aliases"]),
+                    "species": row["species"],
+                    "mhc_class": row["mhc_class"],
+                    "chain_role": row["chain_role"],
+                    "locus": row["locus"],
+                    "sequence": row["sequence"],
+                    "evidence_level": row["evidence_level"],
+                    "observed_spans_1based": row["observed_spans_1based"],
+                    "imputed_spans_1based": row["imputed_spans_1based"],
+                    "observed_residue_count": int(row["observed_residue_count"]),
+                    "imputed_residue_count": int(row["imputed_residue_count"]),
+                    "source_record_ids": _split_aliases(row["source_record_ids"]),
+                    "template_record_id": row["template_record_id"],
+                    "template_allele": row["template_allele"],
+                    "target_pseudo_record_id": row["target_pseudo_record_id"],
+                    "pseudo_distance": int(row["pseudo_distance"]),
+                    "unknown_pseudo_positions": tuple(
+                        int(value)
+                        for value in row["unknown_pseudo_positions"].split(";")
+                        if value
+                    ),
+                    "quality_flags": _split_aliases(row["quality_flags"]),
+                }
+                if af3:
+                    candidates.append(
+                        FallbackAF3SequenceCandidate(
+                            **common, definition_id=row["representation"]
+                        )
+                    )
+                else:
+                    candidates.append(
+                        FallbackSequenceCandidate(
+                            **common, representation=row["representation"]
+                        )
+                    )
+        return tuple(candidates)
+
+    @staticmethod
     def _filter_sequence_candidates(
         candidates: Iterable[SequenceCandidate],
         *,
@@ -258,6 +355,48 @@ class MHCRegistry:
         )
         return _deduplicate(filtered)  # type: ignore[return-value]
 
+    @staticmethod
+    def _filter_fallback_candidates(
+        candidates: Iterable[object],
+        *,
+        mhc_class: str | None,
+        species: str | None,
+        fallback_policy: str,
+        allow_expression_qualified: bool = False,
+        prefer_best: bool = True,
+    ) -> Tuple[object, ...]:
+        policy = normalize_fallback_policy(fallback_policy)
+        expected_class = normalize_mhc_class(mhc_class) if mhc_class else None
+        expected_species = species.lower().strip() if species else None
+        if expected_species and expected_species not in {"human", "mouse"}:
+            raise MHCTransformError("species must be human or mouse")
+        eligible = [
+            candidate
+            for candidate in candidates
+            if evidence_allowed(policy, getattr(candidate, "evidence_level"))
+            and (expected_class is None or getattr(candidate, "mhc_class") == expected_class)
+            and (expected_species is None or getattr(candidate, "species") == expected_species)
+            and (
+                allow_expression_qualified
+                or "expression_qualified_target"
+                not in getattr(candidate, "quality_flags")
+            )
+        ]
+        if not eligible:
+            return ()
+        if not prefer_best:
+            return _deduplicate(eligible)
+        best_rank = min(
+            evidence_priority(policy, getattr(candidate, "evidence_level"))
+            for candidate in eligible
+        )
+        return _deduplicate(
+            candidate
+            for candidate in eligible
+            if evidence_priority(policy, getattr(candidate, "evidence_level"))
+            == best_rank
+        )
+
     def allele_to_sequence(
         self,
         allele: str,
@@ -266,12 +405,19 @@ class MHCRegistry:
         species: str | None = None,
         include_partial: bool = False,
         allow_two_field_projection: bool = False,
+        fallback: str = "none",
     ) -> QueryResult:
-        """Convert a chain allele/name to deposited precursor protein sequence(s)."""
+        """Convert a chain name to strict precursor or explicit fallback sequence(s)."""
 
+        fallback_policy = normalize_fallback_policy(fallback)
+        if include_partial and fallback_policy != "none":
+            raise MHCTransformError(
+                "include_partial and fallback are separate modes; use only one"
+            )
         exact = self._sequence_name_index.get(exact_name_key(allele), ())
         notes: List[str] = []
         projected = False
+        fallback_key = exact_name_key(allele)
         candidates = self._filter_sequence_candidates(
             exact,
             mhc_class=mhc_class,
@@ -279,16 +425,17 @@ class MHCRegistry:
             include_partial=include_partial,
         )
         if not candidates and not exact and allow_two_field_projection:
-            fallback = two_field_hla(allele)
-            if fallback and exact_name_key(fallback) != exact_name_key(allele):
+            two_field = two_field_hla(allele)
+            if two_field and exact_name_key(two_field) != exact_name_key(allele):
                 candidates = self._filter_sequence_candidates(
-                    self._sequence_name_index.get(exact_name_key(fallback), ()),
+                    self._sequence_name_index.get(exact_name_key(two_field), ()),
                     mhc_class=mhc_class,
                     species=species,
                     include_partial=include_partial,
                 )
                 if candidates:
                     projected = True
+                    fallback_key = exact_name_key(two_field)
                     notes.append(
                         "No exact deposited name was found; explicit two-field projection was enabled, so all matching protein-group candidates are returned."
                     )
@@ -303,12 +450,55 @@ class MHCRegistry:
                 notes.append(
                     "Matching deposited sequence(s) exist but fail the precursor-completeness rule; retry with include_partial=True."
                 )
+        fallback_candidates: Tuple[object, ...] = ()
+        if not candidates and fallback_policy != "none":
+            fallback_candidates = self._filter_fallback_candidates(
+                self._fallback_sequence_name_index.get(fallback_key, ()),
+                mhc_class=mhc_class,
+                species=species,
+                fallback_policy=fallback_policy,
+                allow_expression_qualified=True,
+            )
+            if fallback_candidates:
+                notes.append(
+                    "Strict complete sequence unavailable; an explicitly labelled fallback representation was returned."
+                )
+        returned_candidates = fallback_candidates or candidates
+        evidence_levels = {
+            _candidate_evidence(candidate)
+            for candidate in returned_candidates
+        }
+        evidence = (
+            next(iter(evidence_levels))
+            if len(evidence_levels) == 1
+            else ("mixed" if evidence_levels else "source_exact")
+        )
+        representations = {
+            getattr(candidate, "sequence_kind", "precursor_full")
+            for candidate in candidates
+        }
+        representation = (
+            next(iter(representations))
+            if len(representations) == 1
+            else ("mixed_deposited_sequence" if representations else "precursor_full")
+        )
+        if fallback_candidates:
+            representations = {
+                getattr(candidate, "representation") for candidate in fallback_candidates
+            }
+            representation = (
+                next(iter(representations))
+                if len(representations) == 1
+                else "mixed_fallback_sequence"
+            )
         return QueryResult(
             query=allele,
-            representation="precursor_full",
-            status=result_status(len(candidates), projected=projected),
-            candidates=candidates,
+            representation=representation,
+            status=result_status(len(returned_candidates), projected=projected),
+            candidates=returned_candidates,
             notes=tuple(notes),
+            fallback_used=fallback_policy if fallback_candidates else "none",
+            evidence=evidence,
         )
 
     def sequence_to_alleles(
@@ -318,35 +508,88 @@ class MHCRegistry:
         mhc_class: str | None = None,
         species: str | None = None,
         include_partial: bool = False,
+        include_fallback: str = "none",
     ) -> QueryResult:
-        """Return all exact allele/name candidates for a precursor sequence."""
+        """Return strict exact and opt-in compatible names for a protein sequence."""
 
-        normalized = normalize_sequence(sequence, allow_x=include_partial)
+        fallback_policy = normalize_fallback_policy(include_fallback)
+        if include_partial and fallback_policy != "none":
+            raise MHCTransformError(
+                "include_partial and include_fallback are separate modes; use only one"
+            )
+        normalized = normalize_sequence(
+            sequence,
+            allow_x=include_partial or fallback_policy != "none",
+        )
         candidates = self._filter_sequence_candidates(
             self._sequence_value_index.get(normalized, ()),
             mhc_class=mhc_class,
             species=species,
             include_partial=include_partial,
         )
+        fallback_candidates: Tuple[object, ...] = ()
+        if fallback_policy != "none":
+            fallback_candidates = self._filter_fallback_candidates(
+                self._fallback_sequence_value_index.get(normalized, ()),
+                mhc_class=mhc_class,
+                species=species,
+                fallback_policy=fallback_policy,
+                allow_expression_qualified=True,
+                prefer_best=False,
+            )
+        returned_candidates = _deduplicate((*candidates, *fallback_candidates))
         deposited_names = {
             alias
-            for candidate in candidates
+            for candidate in returned_candidates
             for alias in candidate.aliases
             if alias.startswith("HLA-") and "*" in alias
         }
-        reverse_status = result_status(len(candidates))
+        reverse_status = result_status(len(returned_candidates))
         notes: Tuple[str, ...] = ()
-        if len(deposited_names) > 1:
+        if len(deposited_names) > 1 and not fallback_candidates:
             reverse_status = "exact_ambiguous"
             notes = (
                 "Multiple deposited HLA allele names share this exact protein; they are compactly listed in candidate aliases.",
             )
+        if fallback_candidates:
+            reverse_status = (
+                "compatible_unique"
+                if len(returned_candidates) == 1
+                else "compatible_ambiguous"
+            )
+            notes = (*notes, "Sequence matches an engineered/partial fallback construct, not proof of an exact biological full allele.")
+        evidence_levels = {
+            _candidate_evidence(candidate)
+            for candidate in returned_candidates
+        }
+        deposited_representations = {
+            candidate.sequence_kind for candidate in candidates
+        }
+        strict_representation = (
+            next(iter(deposited_representations))
+            if len(deposited_representations) == 1
+            else (
+                "mixed_deposited_sequence"
+                if deposited_representations
+                else "precursor_full"
+            )
+        )
         return QueryResult(
             query=normalized,
-            representation="precursor_full",
+            representation=(
+                "fallback_sequence_match"
+                if fallback_candidates
+                else strict_representation
+            ),
             status=reverse_status,
-            candidates=candidates,
+            candidates=returned_candidates,
             notes=notes,
+            fallback_used=fallback_policy if fallback_candidates else "none",
+            evidence=(
+                next(iter(evidence_levels))
+                if len(evidence_levels) == 1
+                else ("mixed" if evidence_levels else "source_exact")
+            ),
         )
 
     def allele_to_af3(
@@ -357,10 +600,14 @@ class MHCRegistry:
         species: str | None = None,
         definition_id: str = AF3_DEFINITION,
         allow_two_field_projection: bool = False,
+        fallback: str = "none",
+        allow_expression_qualified: bool = False,
     ) -> QueryResult:
         """Convert a chain allele/name to a mature soluble AF3 input chain."""
 
+        fallback_policy = normalize_fallback_policy(fallback)
         query_key = exact_name_key(allele)
+        fallback_key = query_key
         exact = self._af3_name_index.get(query_key, ())
         candidates = self._filter_af3_candidates(
             exact,
@@ -379,16 +626,17 @@ class MHCRegistry:
             and not exclusions
             and allow_two_field_projection
         ):
-            fallback = two_field_hla(allele)
-            if fallback and exact_name_key(fallback) != query_key:
+            two_field = two_field_hla(allele)
+            if two_field and exact_name_key(two_field) != query_key:
                 candidates = self._filter_af3_candidates(
-                    self._af3_name_index.get(exact_name_key(fallback), ()),
+                    self._af3_name_index.get(exact_name_key(two_field), ()),
                     mhc_class=mhc_class,
                     species=species,
                     definition_id=definition_id,
                 )
                 if candidates:
                     projected = True
+                    fallback_key = exact_name_key(two_field)
                     notes.append(
                         "No exact deposited name was found; explicit two-field projection was enabled, so all matching AF3 chain candidates are returned."
                     )
@@ -400,12 +648,56 @@ class MHCRegistry:
                 notes.append(
                     "An exact deposited protein name exists but is partial or otherwise not AF3-ready; two-field projection is suppressed."
                 )
+        fallback_candidates: Tuple[object, ...] = ()
+        if not candidates and fallback_policy != "none":
+            fallback_candidates = self._filter_fallback_candidates(
+                self._fallback_af3_name_index.get(fallback_key, ()),
+                mhc_class=mhc_class,
+                species=species,
+                fallback_policy=fallback_policy,
+                allow_expression_qualified=allow_expression_qualified,
+            )
+            if fallback_candidates:
+                notes.append(
+                    "Strict AF3 chain unavailable; an explicitly labelled ectodomain fallback/construct was returned."
+                )
+            elif not allow_expression_qualified:
+                unfiltered = self._filter_fallback_candidates(
+                    self._fallback_af3_name_index.get(fallback_key, ()),
+                    mhc_class=mhc_class,
+                    species=species,
+                    fallback_policy=fallback_policy,
+                    allow_expression_qualified=True,
+                )
+                if unfiltered:
+                    notes.append(
+                        "Fallback exists but the allele has an expression suffix; set allow_expression_qualified=True to model it explicitly."
+                    )
+        returned_candidates = fallback_candidates or candidates
+        evidence_levels = {
+            getattr(candidate, "evidence_level", "source_exact")
+            for candidate in returned_candidates
+        }
+        representations = {
+            getattr(candidate, "definition_id", definition_id)
+            for candidate in returned_candidates
+        }
         return QueryResult(
             query=allele,
-            representation=definition_id,
-            status=result_status(len(candidates), projected=projected),
-            candidates=candidates,
+            representation=(
+                next(iter(representations))
+                if len(representations) == 1
+                else definition_id
+            ),
+            status=result_status(len(returned_candidates), projected=projected),
+            candidates=returned_candidates,
             notes=tuple(notes),
+            fallback_used=fallback_policy if fallback_candidates else "none",
+            evidence=(
+                next(iter(evidence_levels))
+                if len(evidence_levels) == 1
+                else ("mixed" if evidence_levels else "source_exact")
+            ),
         )
 
     def af3_to_alleles(
@@ -415,9 +707,11 @@ class MHCRegistry:
         mhc_class: str | None = None,
         species: str | None = None,
         definition_id: str = AF3_DEFINITION,
+        include_fallback: str = "none",
     ) -> QueryResult:
-        """Return every exact chain allele/name sharing an AF3 input sequence."""
+        """Return strict exact and opt-in compatible names for an AF3 chain."""
 
+        fallback_policy = normalize_fallback_policy(include_fallback)
         normalized = normalize_sequence(sequence)
         candidates = self._filter_af3_candidates(
             self._af3_value_index.get(normalized, ()),
@@ -425,25 +719,55 @@ class MHCRegistry:
             species=species,
             definition_id=definition_id,
         )
+        fallback_candidates: Tuple[object, ...] = ()
+        if fallback_policy != "none":
+            fallback_candidates = self._filter_fallback_candidates(
+                self._fallback_af3_value_index.get(normalized, ()),
+                mhc_class=mhc_class,
+                species=species,
+                fallback_policy=fallback_policy,
+                allow_expression_qualified=True,
+                prefer_best=False,
+            )
+        returned_candidates = _deduplicate((*candidates, *fallback_candidates))
         deposited_names = {
             alias
-            for candidate in candidates
+            for candidate in returned_candidates
             for alias in candidate.aliases
             if alias.startswith("HLA-") and "*" in alias
         }
-        reverse_status = result_status(len(candidates))
+        reverse_status = result_status(len(returned_candidates))
         notes: Tuple[str, ...] = ()
-        if len(deposited_names) > 1:
+        if len(deposited_names) > 1 and not fallback_candidates:
             reverse_status = "exact_ambiguous"
             notes = (
                 "Multiple deposited HLA allele names share this exact AF3 chain; they are retained in candidate aliases.",
             )
+        if fallback_candidates:
+            reverse_status = (
+                "compatible_unique"
+                if len(returned_candidates) == 1
+                else "compatible_ambiguous"
+            )
+            notes = (*notes, "Sequence matches an engineered AF3 fallback construct; this is compatibility, not proof of an exact biological allele.")
+        evidence_levels = {
+            getattr(candidate, "evidence_level", "source_exact")
+            for candidate in returned_candidates
+        }
         return QueryResult(
             query=normalized,
-            representation=definition_id,
+            representation=(
+                "fallback_af3_construct_match" if fallback_candidates else definition_id
+            ),
             status=reverse_status,
-            candidates=candidates,
+            candidates=returned_candidates,
             notes=notes,
+            fallback_used=fallback_policy if fallback_candidates else "none",
+            evidence=(
+                next(iter(evidence_levels))
+                if len(evidence_levels) == 1
+                else ("mixed" if evidence_levels else "source_exact")
+            ),
         )
 
     def allele_to_pseudo(
@@ -595,8 +919,10 @@ class MHCRegistry:
         name: str,
         *,
         mhc_class: str,
+        species: str | None = None,
         include_partial: bool = False,
         allow_two_field_projection: bool = False,
+        fallback: str = "none",
     ) -> QueryResult:
         """Resolve a complete MHC molecule into its two precursor chains.
 
@@ -606,6 +932,7 @@ class MHCRegistry:
         """
 
         expected_class = normalize_mhc_class(mhc_class)
+        fallback_policy = normalize_fallback_policy(fallback)
         notes: List[str] = []
         molecules: List[MoleculeCandidate] = []
         projected = False
@@ -613,8 +940,10 @@ class MHCRegistry:
             heavy = self.allele_to_sequence(
                 name,
                 mhc_class="I",
+                species=species,
                 include_partial=include_partial,
                 allow_two_field_projection=allow_two_field_projection,
+                fallback=fallback_policy,
             )
             projected = projected or heavy.status.startswith("projected_")
             notes.extend(f"heavy chain: {note}" for note in heavy.notes)
@@ -644,14 +973,18 @@ class MHCRegistry:
                 alpha = self.allele_to_sequence(
                     alpha_name,
                     mhc_class="II",
+                    species=species,
                     include_partial=include_partial,
                     allow_two_field_projection=allow_two_field_projection,
+                    fallback=fallback_policy,
                 )
                 beta = self.allele_to_sequence(
                     beta_name,
                     mhc_class="II",
+                    species=species,
                     include_partial=include_partial,
                     allow_two_field_projection=allow_two_field_projection,
+                    fallback=fallback_policy,
                 )
                 projected = projected or alpha.status.startswith("projected_")
                 projected = projected or beta.status.startswith("projected_")
@@ -681,12 +1014,41 @@ class MHCRegistry:
             unique[key] = molecule
         candidates = tuple(unique[key] for key in sorted(unique))
         deduplicated_notes = tuple(dict.fromkeys(notes))
+        evidence_levels = {
+            _candidate_evidence(chain)
+            for molecule in candidates
+            for chain in molecule.chains
+        }
+        fallback_returned = any(
+            hasattr(chain, "evidence_level")
+            for molecule in candidates
+            for chain in molecule.chains
+        )
+        partial_deposited_returned = any(
+            isinstance(chain, SequenceCandidate) and not chain.is_complete
+            for molecule in candidates
+            for chain in molecule.chains
+        )
         return QueryResult(
             query=name,
-            representation="precursor_full_molecule",
+            representation=(
+                "fallback_precursor_molecule"
+                if fallback_returned
+                else (
+                    "deposited_molecule_with_partial_chain"
+                    if partial_deposited_returned
+                    else "precursor_full_molecule"
+                )
+            ),
             status=result_status(len(candidates), projected=projected),
             candidates=candidates,
             notes=deduplicated_notes,
+            fallback_used=fallback_policy if fallback_returned else "none",
+            evidence=(
+                next(iter(evidence_levels))
+                if len(evidence_levels) == 1
+                else ("mixed" if evidence_levels else "source_exact")
+            ),
         )
 
     def molecule_to_af3_chains(
@@ -694,12 +1056,16 @@ class MHCRegistry:
         name: str,
         *,
         mhc_class: str,
+        species: str | None = None,
         definition_id: str = AF3_DEFINITION,
         allow_two_field_projection: bool = False,
+        fallback: str = "none",
+        allow_expression_qualified: bool = False,
     ) -> QueryResult:
         """Resolve an MHC molecule into the two separate AF3 protein chains."""
 
         expected_class = normalize_mhc_class(mhc_class)
+        fallback_policy = normalize_fallback_policy(fallback)
         notes: List[str] = []
         molecules: List[AF3MoleculeCandidate] = []
         projected = False
@@ -707,8 +1073,11 @@ class MHCRegistry:
             heavy = self.allele_to_af3(
                 name,
                 mhc_class="I",
+                species=species,
                 definition_id=definition_id,
                 allow_two_field_projection=allow_two_field_projection,
+                fallback=fallback_policy,
+                allow_expression_qualified=allow_expression_qualified,
             )
             projected = heavy.status.startswith("projected_")
             notes.extend(f"heavy chain: {note}" for note in heavy.notes)
@@ -740,14 +1109,20 @@ class MHCRegistry:
                 alpha = self.allele_to_af3(
                     alpha_name,
                     mhc_class="II",
+                    species=species,
                     definition_id=definition_id,
                     allow_two_field_projection=allow_two_field_projection,
+                    fallback=fallback_policy,
+                    allow_expression_qualified=allow_expression_qualified,
                 )
                 beta = self.allele_to_af3(
                     beta_name,
                     mhc_class="II",
+                    species=species,
                     definition_id=definition_id,
                     allow_two_field_projection=allow_two_field_projection,
+                    fallback=fallback_policy,
+                    allow_expression_qualified=allow_expression_qualified,
                 )
                 projected = projected or alpha.status.startswith("projected_")
                 projected = projected or beta.status.startswith("projected_")
@@ -784,12 +1159,35 @@ class MHCRegistry:
             )
             unique[key] = molecule
         candidates = tuple(unique[key] for key in sorted(unique))
+        evidence_levels = {
+            getattr(chain, "evidence_level", "source_exact")
+            for molecule in candidates
+            for chain in molecule.chains
+        }
+        fallback_returned = any(
+            hasattr(chain, "evidence_level")
+            for molecule in candidates
+            for chain in molecule.chains
+        )
+        synthetic_returned = bool(
+            evidence_levels & {IMPUTED_EVIDENCE, PSEUDO_SCAFFOLD_EVIDENCE}
+        )
         return QueryResult(
             query=name,
-            representation=f"{definition_id}_molecule",
+            representation=(
+                f"{IMPUTED_AF3_DEFINITION}_molecule"
+                if synthetic_returned
+                else f"{definition_id}_molecule"
+            ),
             status=result_status(len(candidates), projected=projected),
             candidates=candidates,
             notes=tuple(dict.fromkeys(notes)),
+            fallback_used=fallback_policy if fallback_returned else "none",
+            evidence=(
+                next(iter(evidence_levels))
+                if len(evidence_levels) == 1
+                else ("mixed" if evidence_levels else "source_exact")
+            ),
         )
 
     def stats(self) -> Dict[str, object]:
@@ -799,6 +1197,144 @@ class MHCRegistry:
             "af3_sequence_records": len(self._af3_sequences),
             "pseudo_records": len(self._pseudos),
             "pair_records": len(self._pairs),
+            "fallback_sequence_records": len(self._fallback_sequences),
+            "fallback_af3_records": len(self._fallback_af3_sequences),
+            "fallback_by_evidence": dict(
+                sorted(
+                    Counter(
+                        item.evidence_level
+                        for item in (
+                            *self._fallback_sequences,
+                            *self._fallback_af3_sequences,
+                        )
+                    ).items()
+                )
+            ),
             "metadata": self.metadata,
+        }
+
+    def coverage(
+        self,
+        name: str,
+        *,
+        mhc_class: str,
+        species: str | None = None,
+        allow_expression_qualified: bool = False,
+    ) -> Dict[str, object]:
+        """Summarize strict, partial, imputed and pseudo-scaffold availability."""
+
+        expected_class = normalize_mhc_class(mhc_class)
+        pseudo_definition = (
+            PSEUDO_I_DEFINITION if expected_class == "I" else PSEUDO_II_DEFINITION
+        )
+        pseudo = self.allele_to_pseudo(
+            name,
+            mhc_class=expected_class,
+            definition_id=pseudo_definition,
+            species=species,
+        )
+        if expected_class == "I":
+            full_calls = {
+                "strict_full": self.allele_to_sequence(
+                    name, mhc_class="I", species=species
+                ),
+                "partial": self.allele_to_sequence(
+                    name, mhc_class="I", species=species, fallback="partial"
+                ),
+                "imputed_full": self.allele_to_sequence(
+                    name, mhc_class="I", species=species, fallback="imputed"
+                ),
+                "pseudo_scaffold_full": self.allele_to_sequence(
+                    name,
+                    mhc_class="I",
+                    species=species,
+                    fallback="pseudo-scaffold",
+                ),
+            }
+            af3_calls = {
+                "strict_af3": self.allele_to_af3(name, mhc_class="I", species=species),
+                "partial_af3": self.allele_to_af3(
+                    name,
+                    mhc_class="I",
+                    species=species,
+                    fallback="partial",
+                    allow_expression_qualified=allow_expression_qualified,
+                ),
+                "imputed_af3": self.allele_to_af3(
+                    name,
+                    mhc_class="I",
+                    species=species,
+                    fallback="imputed",
+                    allow_expression_qualified=allow_expression_qualified,
+                ),
+                "pseudo_scaffold_af3": self.allele_to_af3(
+                    name,
+                    mhc_class="I",
+                    species=species,
+                    fallback="pseudo-scaffold",
+                    allow_expression_qualified=allow_expression_qualified,
+                ),
+            }
+        else:
+            full_calls = {
+                "strict_full": self.molecule_to_chains(
+                    name, mhc_class="II", species=species
+                ),
+                "partial": self.molecule_to_chains(
+                    name, mhc_class="II", species=species, fallback="partial"
+                ),
+                "imputed_full": self.molecule_to_chains(
+                    name, mhc_class="II", species=species, fallback="imputed"
+                ),
+                "pseudo_scaffold_full": self.molecule_to_chains(
+                    name,
+                    mhc_class="II",
+                    species=species,
+                    fallback="pseudo-scaffold",
+                ),
+            }
+            af3_calls = {
+                "strict_af3": self.molecule_to_af3_chains(
+                    name, mhc_class="II", species=species
+                ),
+                "partial_af3": self.molecule_to_af3_chains(
+                    name,
+                    mhc_class="II",
+                    species=species,
+                    fallback="partial",
+                    allow_expression_qualified=allow_expression_qualified,
+                ),
+                "imputed_af3": self.molecule_to_af3_chains(
+                    name,
+                    mhc_class="II",
+                    species=species,
+                    fallback="imputed",
+                    allow_expression_qualified=allow_expression_qualified,
+                ),
+                "pseudo_scaffold_af3": self.molecule_to_af3_chains(
+                    name,
+                    mhc_class="II",
+                    species=species,
+                    fallback="pseudo-scaffold",
+                    allow_expression_qualified=allow_expression_qualified,
+                ),
+            }
+
+        def summarize(result: QueryResult) -> Dict[str, object]:
+            return {
+                "status": result.status,
+                "candidate_count": result.candidate_count,
+                "representation": result.representation,
+                "fallback_used": result.fallback_used,
+                "evidence": result.evidence,
+                "notes": list(result.notes),
+            }
+
+        return {
+            "query": name,
+            "mhc_class": expected_class,
+            "pseudo": summarize(pseudo),
+            **{key: summarize(value) for key, value in full_calls.items()},
+            **{key: summarize(value) for key, value in af3_calls.items()},
         }
 

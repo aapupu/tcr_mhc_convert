@@ -20,6 +20,11 @@ records.
   `eddf17d972285a89e80e2837adc1ee6308f5b96b`. See
   <https://github.com/gifford-lab/PUFFIN> and the original NetMHCpan /
   NetMHCIIpan publications cited in `AUDIT_REPORT.md`.
+- `fallback_*_sequences.csv` contains project-derived partial annotations and
+  synthetic same-locus scaffolds. Each row identifies its deposited source,
+  complete template, pseudo record, and observed/imputed spans. These rows are
+  not official IPD/UniProt allele protein sequences and remain subject to the
+  upstream data terms above.
 
 Every generated source is identified by a SHA-256 digest in `metadata.json`.
 Users redistributing data should review the current terms of each upstream

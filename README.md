@@ -10,7 +10,7 @@ This repository was renamed from `aapupu/tcr_design`.
 
 | Package | Main capabilities | CLI |
 |---|---|---|
-| [`MHCtransform`](MHCtransform/) | Exact bidirectional conversion between human/mouse MHC-I or MHC-II allele names and precursor proteins, AF3-ready extracellular chains, or 34-aa pseudosequences; species-matched B2M for MHC-I and separate alpha/beta chains for MHC-II | `mhctransform` |
+| [`MHCtransform`](MHCtransform/) | Strict bidirectional conversion between human/mouse MHC-I or MHC-II names and precursor proteins, AF3-ready extracellular chains, or 34-aa pseudosequences, plus isolated opt-in partial/imputed/pseudo-scaffold fallbacks; species-matched B2M for MHC-I and separate alpha/beta chains for MHC-II | `mhctransform` |
 | [`TCRtransform`](TCRtransform/) | Human/mouse alpha/beta TCR extracellular-chain reconstruction from V + CDR3 + J + C, CDR1/2/2.5/3 annotation, CDR3 boundary analysis, and reverse parsing of complete extracellular chains | `tcrtransform` |
 
 Both packages use only the Python standard library at runtime and support Python 3.9 or newer. They share one GitHub repository while retaining independent package names, versions, APIs, and command-line programs, so they can be installed separately or together.
@@ -41,12 +41,16 @@ mhctransform molecule-to-af3 'HLA-A*02:01' --class I
 mhctransform molecule-to-af3 \
   'HLA-DRA*01:01/HLA-DRB1*15:01' --class II
 
+# Rare allele: retain deposited residues and fill only missing AF3 positions
+mhctransform molecule-to-af3 'HLA-B*08:03' \
+  --class I --fallback imputed
+
 # NetMHCpan-compatible 34-aa descriptor
 mhctransform allele-to-pseudo 'HLA-A*02:01' \
   --class I --definition netmhcpan-34-v1
 ```
 
-Use `full-to-allele`, `af3-to-allele`, and `pseudo-to-allele` for reverse lookup. Reverse queries retain every exact candidate and never present a many-to-one mapping as a unique allele. See the [`MHCtransform` documentation](MHCtransform/README.md) and [audit report](MHCtransform/AUDIT_REPORT.md) for definitions, coverage, limitations, and provenance.
+Use `full-to-allele`, `af3-to-allele`, and `pseudo-to-allele` for reverse lookup. Strict sequences return all exact candidates. Fallback constructs are excluded unless `--include-fallback` is supplied, and then return `compatible_*` candidates rather than claiming a biological exact match. See the [`MHCtransform` documentation](MHCtransform/README.md) and [audit report](MHCtransform/AUDIT_REPORT.md) for definitions, coverage, limitations, and provenance.
 
 ### TCR V/J/CDR3 to AF3-ready alpha/beta extracellular chains
 
@@ -72,7 +76,7 @@ Provide each molecule as an independent protein entity. Do not join chains with 
 | 4 | Mature TCR alpha V+C extracellular chain | Mature TCR alpha V+C extracellular chain |
 | 5 | Mature TCR beta V+C extracellular chain | Mature TCR beta V+C extracellular chain |
 
-The MHC profile `af3-soluble-extracellular-v1` removes the signal peptide, transmembrane helix, and cytoplasmic tail while retaining all extracellular folded domains and the membrane-proximal connector. `TCRtransform` produces mature TCR V+C extracellular structural chains. AlphaFold 3 specifies that these amino-acid chains should be supplied as separate entities but does not prescribe universal crop coordinates; these retained regions are the repository's audited engineering profile.
+The MHC profile `af3-soluble-extracellular-v1` removes the signal peptide, transmembrane helix, and cytoplasmic tail while retaining all extracellular folded domains and the membrane-proximal connector. `TCRtransform` produces mature TCR V+C extracellular structural chains. AlphaFold 3 specifies that these amino-acid chains should be supplied as separate entities but does not prescribe universal crop coordinates; these retained regions are the repository's audited engineering profile. Imputed and pseudo-scaffold MHC chains are suitable for explicitly qualified structural screening, not as assertions of an unknown allele's true full sequence.
 
 ## Tests
 

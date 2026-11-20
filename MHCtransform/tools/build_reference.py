@@ -180,6 +180,14 @@ MOUSE_PAIRS: Mapping[str, Tuple[str, str]] = {
     "H-2-IEk": ("H2-Ea*k", "H2-Eb1*k"),
 }
 
+# UniProt P14437 is a complete mature membrane protein without a deposited
+# signal peptide.  It is not a precursor_full record, but its annotated
+# extracellular region is exact and is therefore valid for the strict AF3
+# representation.
+MOUSE_EXACT_ECTODOMAIN_SPANS: Mapping[str, Tuple[int, int]] = {
+    "P14437": (1, 195),
+}
+
 
 FULL_FIELDS = (
     "record_id",
@@ -955,6 +963,39 @@ def build_af3_sequences(
     excluded_suffixes = {"N", "L", "S", "Q", "C", "A"}
 
     for full_row in full_rows:
+        curated_accessions = [
+            accession
+            for accession in full_row["source_accession"].split(",")
+            if accession in MOUSE_EXACT_ECTODOMAIN_SPANS
+        ]
+        if curated_accessions:
+            if len(curated_accessions) != 1:
+                raise ValueError("multiple curated exact ectodomain accessions")
+            accession = curated_accessions[0]
+            topology_row = topology.get(accession)
+            expected_span = MOUSE_EXACT_ECTODOMAIN_SPANS[accession]
+            if topology_row is None or topology_row.get("Sequence") != full_row["sequence"]:
+                raise ValueError(f"missing exact topology sequence for {accession}")
+            observed_span = extracellular_span_from_topology(topology_row)
+            if observed_span != expected_span:
+                raise ValueError(
+                    f"curated ectodomain span changed for {accession}: {observed_span}"
+                )
+            segment = full_row["sequence"][expected_span[0] - 1 : expected_span[1]]
+            if not segment or set(segment) - AA:
+                raise ValueError(f"invalid curated ectodomain for {accession}")
+            _add_af3_candidate(
+                grouped,
+                full_row,
+                segment,
+                expected_span[0],
+                expected_span[1],
+                boundary_method=(
+                    "reviewed UniProt exact extracellular topology on complete mature membrane sequence"
+                ),
+                boundary_source=f"UniProtKB {accession}",
+            )
+            continue
         if full_row["is_complete"] != "true":
             continue
         suffix_match = re.search(r"([A-Z])$", full_row["allele"])
@@ -1514,7 +1555,7 @@ def build(args: argparse.Namespace) -> None:
     )
 
     metadata = {
-        "schema_version": 2,
+        "schema_version": 3,
         "generated_on": date.today().isoformat(),
         "sequence_kind": (
             "precursor_full (default full lookup); partial_deposited_protein (opt-in); "
@@ -1615,7 +1656,11 @@ def build(args: argparse.Namespace) -> None:
                 "Reviewed UniProt locus topology projected through the pinned official "
                 "IPD protein alignment to each exact deposited allele sequence."
             ),
-            "mouse_and_b2m_boundary_method": "Exact accession-specific UniProt topology features.",
+            "mouse_and_b2m_boundary_method": (
+                "Exact accession-specific UniProt topology features; P14437 is a "
+                "reviewed signal-free mature membrane chain whose residues 1-195 are "
+                "the exact extracellular domain."
+            ),
             "excluded_expression_suffixes": ["N", "L", "S", "Q", "C", "A"],
             "excluded_file": "excluded_af3_sequences.csv",
             "pseudo34_is_not_a_structure_chain": True,
@@ -1640,6 +1685,18 @@ def build(args: argparse.Namespace) -> None:
             "warning": "Complete means the bundled source represents the complete coding protein record. It is not an assertion of cell-surface expression; biologically truncating/null alleles can be complete records.",
         },
     }
+    with (output_dir / "metadata.json").open("w", encoding="utf-8") as handle:
+        json.dump(metadata, handle, ensure_ascii=False, indent=2, sort_keys=True)
+        handle.write("\n")
+
+    # Fallback construction intentionally runs only after the strict registry
+    # and its preliminary metadata are complete.  It reads those immutable
+    # assets and writes separate indexes.
+    from build_fallback_reference import build_fallback_files, fallback_metadata_fields
+
+    fallback_counts = build_fallback_files(output_dir)
+    metadata.update(fallback_metadata_fields())
+    metadata["counts"].update(fallback_counts)
     with (output_dir / "metadata.json").open("w", encoding="utf-8") as handle:
         json.dump(metadata, handle, ensure_ascii=False, indent=2, sort_keys=True)
         handle.write("\n")

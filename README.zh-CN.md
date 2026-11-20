@@ -10,7 +10,7 @@
 
 | 工具 | 主要功能 | 命令行 |
 |---|---|---|
-| [`MHCtransform`](MHCtransform/) | 人/鼠 MHC-I、MHC-II 的 allele/name 与前体全长、AF3 胞外链、34-aa pseudosequence 双向精确转换；MHC-I 自动配物种匹配 B2M，MHC-II 输出 alpha/beta 双链 | `mhctransform` |
+| [`MHCtransform`](MHCtransform/) | 人/鼠 MHC-I、MHC-II 名称与前体全长、AF3 胞外链、34-aa pseudosequence 的严格双向转换，并提供与严格库隔离、需显式开启的 partial/imputed/pseudo-scaffold 后备；MHC-I 自动配物种匹配 B2M，MHC-II 输出 alpha/beta 双链 | `mhctransform` |
 | [`TCRtransform`](TCRtransform/) | 人/鼠 alpha/beta TCR 的 V + CDR3 + J + C 胞外链重建、CDR1/2/2.5/3 注释、CDR3 边界解析和完整链反查 | `tcrtransform` |
 
 两个包运行时都只依赖 Python 标准库，支持 Python 3.9 及以上版本。它们共享一个 GitHub 仓库，但保留独立的 Python 包名、版本、API 和命令行，因此可以单独或一起安装。
@@ -41,12 +41,16 @@ mhctransform molecule-to-af3 'HLA-A*02:01' --class I
 mhctransform molecule-to-af3 \
   'HLA-DRA*01:01/HLA-DRB1*15:01' --class II
 
+# 稀有等位基因：保留 deposited 残基，只补齐 AF3 缺失位置
+mhctransform molecule-to-af3 'HLA-B*08:03' \
+  --class I --fallback imputed
+
 # NetMHCpan 兼容的 34-aa descriptor
 mhctransform allele-to-pseudo 'HLA-A*02:01' \
   --class I --definition netmhcpan-34-v1
 ```
 
-反向查询使用 `full-to-allele`、`af3-to-allele` 和 `pseudo-to-allele`。反查会保留全部完全匹配候选，不会把多对一映射伪装成唯一等位基因。详细定义、覆盖范围和审核结论见 [`MHCtransform/README.zh-CN.md`](MHCtransform/README.zh-CN.md) 与 [`MHCtransform/AUDIT_REPORT.md`](MHCtransform/AUDIT_REPORT.md)。
+反向查询使用 `full-to-allele`、`af3-to-allele` 和 `pseudo-to-allele`。严格序列会返回全部 exact 候选；后备构建默认不参与反查，只有显式给出 `--include-fallback` 时才返回 `compatible_*` 候选，且不声称生物学精确匹配。详细定义、覆盖范围和审核结论见 [`MHCtransform/README.zh-CN.md`](MHCtransform/README.zh-CN.md) 与 [`MHCtransform/AUDIT_REPORT.md`](MHCtransform/AUDIT_REPORT.md)。
 
 ### TCR V/J/CDR3 -> 适合 AF3 的 alpha/beta 胞外链
 
@@ -72,7 +76,7 @@ tcrtransform build TCRtransform/examples/tcr_input.csv \
 | 4 | TCR alpha 成熟 V+C 胞外链 | TCR alpha 成熟 V+C 胞外链 |
 | 5 | TCR beta 成熟 V+C 胞外链 | TCR beta 成熟 V+C 胞外链 |
 
-`MHCtransform` 的 `af3-soluble-extracellular-v1` 会移除 signal peptide、跨膜区和胞内尾，保留全部胞外折叠域及膜近端连接区；`TCRtransform` 输出成熟的 TCR V+C 胞外结构链。AF3 官方输入格式只要求分别提供各条氨基酸链，并未规定统一裁剪坐标；上述范围是本仓库经过来源核对和测试的工程 profile。
+`MHCtransform` 的 `af3-soluble-extracellular-v1` 会移除 signal peptide、跨膜区和胞内尾，保留全部胞外折叠域及膜近端连接区；`TCRtransform` 输出成熟的 TCR V+C 胞外结构链。AF3 官方输入格式只要求分别提供各条氨基酸链，并未规定统一裁剪坐标；上述范围是本仓库经过来源核对和测试的工程 profile。Imputed 与 pseudo-scaffold MHC 链可用于明确标注前提下的结构初筛，但不能解释为未知等位基因的真实全长序列。
 
 ## 测试
 

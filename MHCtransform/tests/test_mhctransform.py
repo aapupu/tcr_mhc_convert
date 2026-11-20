@@ -366,7 +366,13 @@ class RegistryTests(unittest.TestCase):
         parents = {candidate.record_id: candidate for candidate in self.registry._sequences}
         for candidate in self.registry._af3_sequences:
             parent = parents[candidate.source_full_record_id]
-            self.assertTrue(parent.is_complete)
+            if not parent.is_complete:
+                self.assertEqual(candidate.source_accession, "P14437")
+                self.assertEqual(candidate.allele, "H2-Aa*s")
+                self.assertEqual(
+                    candidate.boundary_method,
+                    "reviewed UniProt exact extracellular topology on complete mature membrane sequence",
+                )
             self.assertEqual(candidate.species, parent.species)
             self.assertEqual(candidate.mhc_class, parent.mhc_class)
             self.assertEqual(candidate.chain_role, parent.chain_role)
@@ -424,6 +430,269 @@ class RegistryTests(unittest.TestCase):
         counts = self.registry.metadata["counts"]["pseudo_by_species_class"]
         for key in ("human/I", "human/II", "mouse/I", "mouse/II"):
             self.assertGreater(counts[key], 0)
+
+    def test_partial_fallback_is_not_labelled_full(self):
+        strict = self.registry.allele_to_sequence("HLA-B*08:03", mhc_class="I")
+        self.assertEqual(strict.status, "not_found")
+        fallback = self.registry.allele_to_sequence(
+            "HLA-B*08:03", mhc_class="I", fallback="partial"
+        )
+        self.assertEqual(fallback.status, "exact_unique")
+        self.assertEqual(fallback.representation, "source-partial-v1")
+        self.assertEqual(fallback.evidence, "source_partial")
+        self.assertEqual(len(fallback.candidates[0].sequence), 181)
+        self.assertEqual(fallback.candidates[0].imputed_residue_count, 0)
+
+    def test_partial_guided_af3_fallback_preserves_pseudo_contract(self):
+        positions = self.registry.metadata["pseudo_definitions"][
+            PSEUDO_I_DEFINITION
+        ]["mature_reference_positions_1_based"]
+        for name in (
+            "HLA-B*08:03",
+            "HLA-B*45:06",
+            "HLA-A*02:50",
+            "HLA-A*03:19",
+            "H-2-Lq",
+        ):
+            with self.subTest(name=name):
+                pseudo = self.registry.allele_to_pseudo(
+                    name, mhc_class="I", definition_id=PSEUDO_I_DEFINITION
+                ).candidates[0]
+                result = self.registry.allele_to_af3(
+                    name, mhc_class="I", fallback="pseudo-scaffold"
+                )
+                self.assertEqual(result.status, "exact_unique")
+                candidate = result.candidates[0]
+                self.assertEqual(candidate.evidence_level, "partial_guided_imputed")
+                self.assertTrue(candidate.source_record_ids)
+                self.assertTrue(candidate.template_allele)
+                observed = "".join(candidate.sequence[position - 1] for position in positions)
+                self.assertEqual(observed, pseudo.pseudo_sequence)
+
+    def test_complete_ectodomain_fragment_is_not_labelled_imputed(self):
+        result = self.registry.allele_to_af3(
+            "HLA-A*02:134", mhc_class="I", fallback="partial"
+        )
+        self.assertEqual(result.status, "exact_unique")
+        candidate = result.candidates[0]
+        self.assertEqual(candidate.evidence_level, "source_exact_ectodomain")
+        self.assertEqual(candidate.definition_id, AF3_DEFINITION)
+        self.assertEqual(candidate.observed_residue_count, len(candidate.sequence))
+        self.assertEqual(candidate.imputed_residue_count, 0)
+        self.assertNotIn(
+            "synthetic_construct_not_official_sequence", candidate.quality_flags
+        )
+
+    def test_pseudo_only_scaffold_is_explicit_lowest_evidence(self):
+        name = "HLA-A*01:04"
+        self.assertEqual(
+            self.registry.allele_to_sequence(
+                name, mhc_class="I", include_partial=True
+            ).status,
+            "not_found",
+        )
+        result = self.registry.allele_to_af3(
+            name, mhc_class="I", fallback="pseudo-scaffold"
+        )
+        self.assertEqual(result.status, "exact_unique")
+        candidate = result.candidates[0]
+        self.assertEqual(candidate.evidence_level, "pseudo_only_scaffold")
+        self.assertEqual(candidate.observed_residue_count, 0)
+        self.assertEqual(candidate.imputed_residue_count, len(candidate.sequence))
+
+    def test_ias_exact_ectodomain_and_iaq_iau_imputed_alpha(self):
+        ias = self.registry.molecule_to_af3_chains("H-2-IAs", mhc_class="II")
+        self.assertEqual(ias.status, "exact_unique")
+        self.assertEqual(
+            [(chain.allele, len(chain.sequence)) for chain in ias.candidates[0].chains],
+            [("H2-Aa*s", 195), ("H2-Ab1*s", 197)],
+        )
+        self.assertEqual(
+            self.registry.molecule_to_chains("H-2-IAs", mhc_class="II").status,
+            "not_found",
+        )
+        ias_full = self.registry.molecule_to_chains(
+            "H-2-IAs", mhc_class="II", fallback="imputed"
+        )
+        self.assertEqual(ias_full.status, "exact_unique")
+        self.assertEqual(
+            ias_full.candidates[0].chains[0].representation,
+            "precursor-imputed-v1",
+        )
+        self.assertEqual(
+            ias_full.candidates[0].chains[0].evidence_level,
+            "partial_guided_imputed",
+        )
+        for name in ("H-2-IAq", "H-2-IAu"):
+            with self.subTest(name=name):
+                strict = self.registry.molecule_to_af3_chains(name, mhc_class="II")
+                self.assertEqual(strict.status, "not_found")
+                fallback = self.registry.molecule_to_af3_chains(
+                    name, mhc_class="II", fallback="pseudo-scaffold"
+                )
+                self.assertEqual(fallback.status, "exact_unique")
+                alpha, beta = fallback.candidates[0].chains
+                self.assertEqual(alpha.evidence_level, "partial_guided_imputed")
+                self.assertEqual(alpha.unknown_pseudo_positions, (1, 2))
+                self.assertEqual(beta.allele, "H2-Ab1*" + name[-1].lower())
+
+    def test_expression_qualified_fallback_requires_override(self):
+        name = "HLA-B*07:44N"
+        default = self.registry.allele_to_af3(
+            name, mhc_class="I", fallback="pseudo-scaffold"
+        )
+        self.assertEqual(default.status, "not_found")
+        explicit = self.registry.allele_to_af3(
+            name,
+            mhc_class="I",
+            fallback="pseudo-scaffold",
+            allow_expression_qualified=True,
+        )
+        self.assertEqual(explicit.status, "exact_unique")
+        self.assertIn("expression_qualified_target", explicit.candidates[0].quality_flags)
+
+    def test_fallback_reverse_is_opt_in_and_never_claims_biological_exactness(self):
+        forward = self.registry.allele_to_af3(
+            "HLA-B*08:03", mhc_class="I", fallback="imputed"
+        )
+        sequence = forward.candidates[0].sequence
+        self.assertEqual(
+            self.registry.af3_to_alleles(sequence, mhc_class="I").status,
+            "not_found",
+        )
+        reverse = self.registry.af3_to_alleles(
+            sequence, mhc_class="I", include_fallback="imputed"
+        )
+        self.assertTrue(reverse.status.startswith("compatible_"))
+        self.assertTrue(any("engineered" in note for note in reverse.notes))
+
+    def test_fallback_reverse_merges_strict_sequence_collisions(self):
+        forward = self.registry.allele_to_af3(
+            "HLA-A*01:04", mhc_class="I", fallback="pseudo-scaffold"
+        )
+        sequence = forward.candidates[0].sequence
+        strict = self.registry.af3_to_alleles(sequence, mhc_class="I")
+        strict_names = {
+            name
+            for candidate in strict.candidates
+            for name in (candidate.allele, *candidate.aliases)
+        }
+        self.assertNotIn("HLA-A*01:04", strict_names)
+
+        compatible = self.registry.af3_to_alleles(
+            sequence, mhc_class="I", include_fallback="pseudo-scaffold"
+        )
+        compatible_names = {
+            name
+            for candidate in compatible.candidates
+            for name in (candidate.allele, *candidate.aliases)
+        }
+        self.assertEqual(compatible.status, "compatible_ambiguous")
+        self.assertIn("HLA-A*01:04", compatible_names)
+        self.assertTrue(strict_names.issubset(compatible_names))
+
+        full_forward = self.registry.allele_to_sequence(
+            "HLA-A*01:04", mhc_class="I", fallback="pseudo-scaffold"
+        )
+        full_sequence = full_forward.candidates[0].sequence
+        full_strict = self.registry.sequence_to_alleles(
+            full_sequence, mhc_class="I"
+        )
+        full_compatible = self.registry.sequence_to_alleles(
+            full_sequence,
+            mhc_class="I",
+            include_fallback="pseudo-scaffold",
+        )
+        full_strict_names = {
+            name
+            for candidate in full_strict.candidates
+            for name in (candidate.allele, *candidate.aliases)
+        }
+        full_compatible_names = {
+            name
+            for candidate in full_compatible.candidates
+            for name in (candidate.allele, *candidate.aliases)
+        }
+        self.assertNotIn("HLA-A*01:04", full_strict_names)
+        self.assertIn("HLA-A*01:04", full_compatible_names)
+        self.assertTrue(full_compatible.status.startswith("compatible_"))
+
+    def test_partial_fallback_reverse_accepts_source_unknown_residue(self):
+        forward = self.registry.allele_to_sequence(
+            "HLA-B*07:44N", mhc_class="I", fallback="partial"
+        )
+        self.assertIn("X", forward.candidates[0].sequence)
+        reverse = self.registry.sequence_to_alleles(
+            forward.candidates[0].sequence,
+            mhc_class="I",
+            include_fallback="partial",
+        )
+        self.assertTrue(reverse.status.startswith("compatible_"))
+        self.assertEqual(forward.candidates[0].imputed_residue_count, 0)
+        self.assertIn(
+            "source_contains_unknown_x", forward.candidates[0].quality_flags
+        )
+
+    def test_reverse_partial_modes_are_mutually_exclusive(self):
+        forward = self.registry.allele_to_sequence(
+            "HLA-B*08:03", mhc_class="I", fallback="partial"
+        )
+        with self.assertRaises(MHCTransformError):
+            self.registry.sequence_to_alleles(
+                forward.candidates[0].sequence,
+                mhc_class="I",
+                include_partial=True,
+                include_fallback="partial",
+            )
+
+    def test_class_ii_coverage_honors_species_filter(self):
+        coverage = self.registry.coverage(
+            "HLA-DRA*01:01/HLA-DRB1*15:01",
+            mhc_class="II",
+            species="mouse",
+        )
+        for key, value in coverage.items():
+            if key in {"query", "mhc_class"}:
+                continue
+            self.assertEqual(value["status"], "not_found", key)
+
+    def test_every_pseudo_name_has_an_explicit_af3_fallback(self):
+        for pseudo in self.registry._pseudos:
+            af3_result = self.registry.molecule_to_af3_chains(
+                pseudo.canonical_name,
+                mhc_class=pseudo.mhc_class,
+                fallback="pseudo-scaffold",
+                allow_expression_qualified=True,
+            )
+            if af3_result.status == "not_found":
+                self.fail(f"missing AF3 fallback for {pseudo.canonical_name}")
+            full_result = self.registry.molecule_to_chains(
+                pseudo.canonical_name,
+                mhc_class=pseudo.mhc_class,
+                fallback="pseudo-scaffold",
+            )
+            if full_result.status == "not_found":
+                self.fail(f"missing full fallback for {pseudo.canonical_name}")
+            for molecule in full_result.candidates:
+                for chain in molecule.chains:
+                    self.assertNotEqual(
+                        getattr(chain, "representation", "precursor_full"),
+                        "source-partial-v1",
+                        pseudo.canonical_name,
+                    )
+
+    def test_every_imputed_full_uses_a_complete_precursor_template(self):
+        parents = {
+            candidate.record_id: candidate for candidate in self.registry._sequences
+        }
+        for candidate in self.registry._fallback_sequences:
+            if candidate.representation != "precursor-imputed-v1":
+                continue
+            self.assertIn(candidate.template_record_id, parents)
+            self.assertTrue(
+                parents[candidate.template_record_id].is_complete,
+                candidate.allele,
+            )
 
 
 if __name__ == "__main__":

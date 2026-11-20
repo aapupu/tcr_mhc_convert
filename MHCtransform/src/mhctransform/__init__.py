@@ -1,9 +1,11 @@
-"""Human/mouse MHC full, AF3-chain and 34-aa pseudo conversion."""
+"""Auditable human/mouse MHC exact, partial and imputed conversion."""
 
 from .errors import MHCTransformError
 from .models import (
     AF3MoleculeCandidate,
     AF3SequenceCandidate,
+    FallbackAF3SequenceCandidate,
+    FallbackSequenceCandidate,
     MoleculeCandidate,
     PseudoCandidate,
     QueryResult,
@@ -16,11 +18,13 @@ __all__ = [
     "MHCTransformError",
     "AF3MoleculeCandidate",
     "AF3SequenceCandidate",
+    "FallbackAF3SequenceCandidate",
+    "FallbackSequenceCandidate",
     "MoleculeCandidate",
     "PseudoCandidate",
     "QueryResult",
     "SequenceCandidate",
 ]
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 

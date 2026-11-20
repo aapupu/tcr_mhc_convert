@@ -32,4 +32,5 @@ jobs:
       - name: CLI smoke tests
         run: |
           mhctransform allele-to-af3 'HLA-A*02:01' --class I > /tmp/mhctransform.json
+          mhctransform molecule-to-af3 'HLA-B*08:03' --class I --fallback imputed > /tmp/mhctransform-fallback.json
           tcrtransform --help > /tmp/tcrtransform-help.txt

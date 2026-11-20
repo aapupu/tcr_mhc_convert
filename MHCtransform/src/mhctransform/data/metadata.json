@@ -12,7 +12,7 @@
     ],
     "excluded_file": "excluded_af3_sequences.csv",
     "human_boundary_method": "Reviewed UniProt locus topology projected through the pinned official IPD protein alignment to each exact deposited allele sequence.",
-    "mouse_and_b2m_boundary_method": "Exact accession-specific UniProt topology features.",
+    "mouse_and_b2m_boundary_method": "Exact accession-specific UniProt topology features; P14437 is a reviewed signal-free mature membrane chain whose residues 1-195 are the exact extracellular domain.",
     "official_vs_engineering_note": "AlphaFold 3 specifies separate protein entities but no pMHC-TCR crop. This ectodomain profile is an auditable engineering default.",
     "pseudo34_is_not_a_structure_chain": true
   },
@@ -35,10 +35,13 @@
       "human/I": 11004,
       "human/II": 2456,
       "mouse/I": 9,
-      "mouse/II": 14
+      "mouse/II": 15
     },
     "af3_excluded_complete": 348,
-    "af3_total": 13483,
+    "af3_total": 13484,
+    "component_targets": 3913,
+    "fallback_af3": 2097,
+    "fallback_full": 4161,
     "full_by_species_class": {
       "human/I": 20066,
       "human/II": 9419,
@@ -57,7 +60,20 @@
     "pseudo_quarantined": 5,
     "pseudo_total": 8588
   },
-  "generated_on": "2026-11-03",
+  "fallback_definitions": {
+    "af3-soluble-extracellular-imputed-v1": "Synthetic AF3 ectodomain scaffold with deposited-observed and non-observed/imputed spans.",
+    "policy_order": [
+      "none",
+      "partial",
+      "imputed",
+      "pseudo-scaffold"
+    ],
+    "precursor-imputed-v1": "Synthetic full-length scaffold retaining aligned deposited residues and all non-X target pseudosequence residues; remaining positions come from a same-species, same-locus complete template.",
+    "source-partial-v1": "Exact deposited fragment; returned only through an explicit fallback policy.",
+    "source_exact_ectodomain": "A deposited fragment that covers every residue of the selected exact extracellular chain; no AF3 residue is imputed.",
+    "warning": "A 34-aa pseudosequence is not invertible. Imputed constructs are structural scaffolds, not official allele protein sequences."
+  },
+  "generated_on": "2026-11-20",
   "pseudo_definitions": {
     "netmhciipan-34-v1": {
       "alpha_mature_reference_positions_1_based": [
@@ -155,8 +171,8 @@
     "file": "quarantined_pseudosequences.csv",
     "rule": "Prefer an explicit current colon-delimited artifact name over a conflicting historical alias; for MHC-II also enforce one modal alpha-15 and beta-19 segment per allele. Ties fail the build."
   },
-  "schema_version": 2,
-  "sequence_kind": "precursor_full (default full lookup); partial_deposited_protein (opt-in); af3-soluble-extracellular-v1 (mature soluble extracellular chain)",
+  "schema_version": 3,
+  "sequence_kind": "precursor_full (strict default); partial_deposited_protein (legacy opt-in); af3-soluble-extracellular-v1 (strict mature extracellular chain); source-partial-v1; precursor-imputed-v1; af3-soluble-extracellular-imputed-v1 (all fallback representations require explicit opt-in)",
   "sources": {
     "af3_human_alignments": {
       "commit": "b2055ea",
