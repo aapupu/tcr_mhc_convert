@@ -19,10 +19,11 @@ import csv
 import hashlib
 import json
 import sys
+from collections import Counter
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Dict, Iterable, List, Mapping, MutableMapping, Sequence, Tuple
+from typing import Dict, Iterable, List, Mapping, MutableMapping, Optional, Sequence, Tuple
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -31,9 +32,11 @@ if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 
 from mhctransform.fallback import (  # noqa: E402
+    ContactProjection,
     compress_positions,
     expand_positions,
     global_alignment_map,
+    project_contact_positions,
 )
 from mhctransform.names import exact_name_key  # noqa: E402
 from mhctransform.pbr import pbr_definition  # noqa: E402
@@ -173,6 +176,30 @@ FALLBACK_PBR_FIELDS = (
     "quality_flags",
 )
 
+PSEUDO_PBR_PROJECTION_FIELDS = (
+    "projection_id",
+    "allele",
+    "species",
+    "mhc_class",
+    "chain_role",
+    "definition_id",
+    "pseudo_segment",
+    "pseudo_start_1based",
+    "pseudo_record_count",
+    "representative_pseudo_record_id",
+    "pbr_record_id",
+    "pbr_source",
+    "contact_positions_1based",
+    "projected_segment",
+    "wildcard_pseudo_positions",
+    "coordinate_method",
+    "alignment_gap_pseudo_positions",
+    "shifted_pseudo_positions",
+    "coordinate_offsets",
+    "max_abs_shift",
+    "coverage_status",
+)
+
 
 def _record_id(*parts: str) -> str:
     return hashlib.sha256("\x1f".join(parts).encode("utf-8")).hexdigest()[:20]
@@ -184,18 +211,22 @@ def _read_csv(path: Path) -> List[Dict[str, str]]:
 
 
 def _write_csv(
-    path: Path, fields: Sequence[str], rows: Iterable[Mapping[str, object]]
+    path: Path,
+    fields: Sequence[str],
+    rows: Iterable[Mapping[str, object]],
+    *,
+    key_fields: Sequence[str] = (
+        "species",
+        "mhc_class",
+        "locus",
+        "allele",
+        "record_id",
+    ),
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     ordered = sorted(
         rows,
-        key=lambda row: (
-            str(row["species"]),
-            str(row["mhc_class"]),
-            str(row["locus"]),
-            str(row["allele"]),
-            str(row["record_id"]),
-        ),
+        key=lambda row: tuple(str(row[field]) for field in key_fields),
     )
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields, lineterminator="\n")
@@ -417,6 +448,299 @@ def build_fallback_pbr_file(data_dir: Path) -> int:
     return len(rows)
 
 
+def _name_index(
+    rows: Sequence[Mapping[str, str]],
+) -> Mapping[str, Tuple[Mapping[str, str], ...]]:
+    index: MutableMapping[str, Dict[str, Mapping[str, str]]] = {}
+    for row in rows:
+        for name in (row["allele"], *row.get("aliases", "").split(";")):
+            if not name:
+                continue
+            index.setdefault(exact_name_key(name), {})[row["record_id"]] = row
+    return {
+        key: tuple(value[record_id] for record_id in sorted(value))
+        for key, value in index.items()
+    }
+
+
+def _pbr_reference_sequences(
+    strict_rows: Sequence[Mapping[str, str]],
+) -> Mapping[Tuple[str, str], str]:
+    index = _name_index(strict_rows)
+    result: Dict[Tuple[str, str], str] = {}
+    for spec in BOUNDARY_REFERENCES:
+        candidates = [
+            row
+            for row in index.get(exact_name_key(spec.allele), ())
+            if row["species"] == spec.species and row["locus"] == spec.locus
+        ]
+        sequences = {row["sequence"] for row in candidates}
+        if len(sequences) != 1:
+            raise ValueError(
+                f"PBR contact reference {spec.allele} resolves to "
+                f"{len(sequences)} sequences"
+            )
+        result[(spec.species, spec.locus)] = next(iter(sequences))
+    return result
+
+
+def _projection_coordinates(
+    candidate: Mapping[str, str],
+    pseudo_segment: str,
+    metadata: Mapping[str, object],
+    references: Mapping[Tuple[str, str], str],
+) -> ContactProjection:
+    pseudo_definitions = metadata["pseudo_definitions"]  # type: ignore[index]
+    if candidate["mhc_class"] == "I":
+        positions = pseudo_definitions["netmhcpan-34-v1"][  # type: ignore[index]
+            "mature_reference_positions_1_based"
+        ]
+        reference = references[(candidate["species"], candidate["locus"])]
+    else:
+        derivation = metadata.get("pseudo_derivation", {})  # type: ignore[assignment]
+        locus_positions = derivation.get(  # type: ignore[union-attr]
+            "mhc_ii_component_contact_positions_1based", {}
+        )
+        if candidate["locus"] in locus_positions:
+            positions = locus_positions[candidate["locus"]]
+            reference = references[(candidate["species"], candidate["locus"])]
+        elif candidate["chain_role"] == "alpha":
+            positions = pseudo_definitions["netmhciipan-34-v1"][  # type: ignore[index]
+                "alpha_mature_reference_positions_1_based"
+            ]
+            reference = references[("human", "DRA")]
+        else:
+            positions = pseudo_definitions["netmhciipan-34-v1"][  # type: ignore[index]
+                "beta_mature_reference_positions_1_based"
+            ]
+            reference = references[("human", "DRB1")]
+    return project_contact_positions(
+        reference,
+        candidate["sequence"],
+        positions,
+        pseudo_segment,
+    )
+
+
+def build_pseudo_pbr_projection_file(data_dir: Path) -> Mapping[str, object]:
+    """Build and enforce the complete pseudo-to-PBR projection contract.
+
+    One audit row is emitted per unique pseudo component. Every pseudo index is
+    assigned a PBR coordinate. Non-``X`` residues must match exactly; DTU
+    ``X`` alignment/unknown tokens are retained as explicit wildcards and are
+    never inserted into a protein chain.
+    """
+
+    pseudo_rows = _read_csv(data_dir / "pseudo_sequences.csv")
+    strict_rows = _read_csv(data_dir / "pbr_sequences.csv")
+    fallback_path = data_dir / "fallback_pbr_sequences.csv"
+    fallback_rows = _read_csv(fallback_path) if fallback_path.is_file() else []
+    with (data_dir / "metadata.json").open("r", encoding="utf-8") as handle:
+        metadata = json.load(handle)
+
+    references = _pbr_reference_sequences(strict_rows)
+    strict_index = _name_index(strict_rows)
+    fallback_index = _name_index(fallback_rows)
+    targets: MutableMapping[Tuple[str, str, str, str], Dict[str, object]] = {}
+    for pseudo in pseudo_rows:
+        if pseudo["mhc_class"] == "I":
+            components = (("heavy", pseudo["canonical_name"], pseudo["pseudo_sequence"], 1),)
+        else:
+            components = (
+                ("alpha", pseudo["alpha_allele"], pseudo["pseudo_sequence"][:15], 1),
+                ("beta", pseudo["beta_allele"], pseudo["pseudo_sequence"][15:], 16),
+            )
+        for role, allele, segment, pseudo_start in components:
+            key = (
+                pseudo["species"],
+                pseudo["mhc_class"],
+                role,
+                exact_name_key(allele),
+            )
+            target = targets.setdefault(
+                key,
+                {
+                    "allele": allele,
+                    "species": pseudo["species"],
+                    "mhc_class": pseudo["mhc_class"],
+                    "chain_role": role,
+                    "pseudo_segment": segment,
+                    "pseudo_start_1based": pseudo_start,
+                    "pseudo_record_ids": set(),
+                },
+            )
+            if target["pseudo_segment"] != segment:
+                raise ValueError(f"conflicting pseudo components for {allele}")
+            target["pseudo_record_ids"].add(pseudo["record_id"])  # type: ignore[union-attr]
+
+    projection_rows = []
+    wildcard_components = 0
+    recovery_components = 0
+    alignment_gap_components = 0
+    shifted_position_count = 0
+    alignment_gap_position_count = 0
+    maximum_shift = 0
+    strict_components = 0
+    fallback_components = 0
+    coordinate_methods: Counter[str] = Counter()
+    for key, target in sorted(targets.items()):
+        segment = str(target["pseudo_segment"])
+        pseudo_start = int(target["pseudo_start_1based"])
+        candidates = [
+            ("strict", row)
+            for row in strict_index.get(key[3], ())
+        ] + [
+            ("fallback", row)
+            for row in fallback_index.get(key[3], ())
+        ]
+        candidates = [
+            (source, row)
+            for source, row in candidates
+            if row["species"] == target["species"]
+            and row["mhc_class"] == target["mhc_class"]
+            and row["chain_role"] == target["chain_role"]
+        ]
+        selected = None
+        errors = []
+        for source, candidate in candidates:
+            try:
+                coordinate_projection = _projection_coordinates(
+                    candidate, segment, metadata, references
+                )
+            except (KeyError, ValueError) as error:
+                errors.append(f"{source}:{candidate['record_id']}:{error}")
+                continue
+            coordinates = coordinate_projection.positions
+            projected = "".join(
+                candidate["sequence"][position - 1] for position in coordinates
+            )
+            if not all(
+                expected == "X" or expected == observed
+                for expected, observed in zip(segment, projected)
+            ):
+                errors.append(
+                    f"{source}:{candidate['record_id']}:non-X residue mismatch"
+                )
+                continue
+            selected = (
+                source,
+                candidate,
+                coordinate_projection,
+                projected,
+            )
+            break
+        if selected is None:
+            detail = "; ".join(errors[:5]) or "no strict/fallback PBR candidate"
+            raise ValueError(
+                f"pseudo-to-PBR contract failed for {target['allele']}: {detail}"
+            )
+
+        source, candidate, coordinate_projection, projected = selected
+        coordinates = coordinate_projection.positions
+        wildcard_positions = tuple(
+            pseudo_start + index
+            for index, residue in enumerate(segment)
+            if residue == "X"
+        )
+        if wildcard_positions:
+            wildcard_components += 1
+        if (
+            coordinate_projection.alignment_gap_pseudo_positions
+            or coordinate_projection.shifted_pseudo_positions
+        ):
+            recovery_components += 1
+        if coordinate_projection.alignment_gap_pseudo_positions:
+            alignment_gap_components += 1
+        shifted_position_count += len(coordinate_projection.shifted_pseudo_positions)
+        alignment_gap_position_count += len(
+            coordinate_projection.alignment_gap_pseudo_positions
+        )
+        maximum_shift = max(maximum_shift, coordinate_projection.max_abs_shift)
+        coordinate_methods[coordinate_projection.coordinate_method] += 1
+        if source == "strict":
+            strict_components += 1
+        else:
+            fallback_components += 1
+        pseudo_ids = sorted(target["pseudo_record_ids"])  # type: ignore[arg-type]
+        definition = (
+            candidate.get("definition_id")
+            or candidate.get("representation")
+            or pbr_definition(candidate["mhc_class"], candidate["chain_role"])
+        )
+        projection_rows.append(
+            {
+                "projection_id": _record_id(
+                    "pseudo-pbr-projection",
+                    str(target["species"]),
+                    str(target["mhc_class"]),
+                    str(target["chain_role"]),
+                    str(target["allele"]),
+                    segment,
+                    candidate["record_id"],
+                ),
+                "allele": target["allele"],
+                "species": target["species"],
+                "mhc_class": target["mhc_class"],
+                "chain_role": target["chain_role"],
+                "definition_id": definition,
+                "pseudo_segment": segment,
+                "pseudo_start_1based": pseudo_start,
+                "pseudo_record_count": len(pseudo_ids),
+                "representative_pseudo_record_id": pseudo_ids[0],
+                "pbr_record_id": candidate["record_id"],
+                "pbr_source": source,
+                "contact_positions_1based": ";".join(
+                    str(position) for position in coordinates
+                ),
+                "projected_segment": projected,
+                "wildcard_pseudo_positions": ";".join(
+                    str(position) for position in wildcard_positions
+                ),
+                "coordinate_method": coordinate_projection.coordinate_method,
+                "alignment_gap_pseudo_positions": ";".join(
+                    str(pseudo_start + position - 1)
+                    for position in coordinate_projection.alignment_gap_pseudo_positions
+                ),
+                "shifted_pseudo_positions": ";".join(
+                    str(pseudo_start + position - 1)
+                    for position in coordinate_projection.shifted_pseudo_positions
+                ),
+                "coordinate_offsets": ";".join(
+                    str(offset) for offset in coordinate_projection.coordinate_offsets
+                ),
+                "max_abs_shift": coordinate_projection.max_abs_shift,
+                "coverage_status": (
+                    "exact_non_x_with_explicit_wildcards"
+                    if wildcard_positions
+                    else "exact"
+                ),
+            }
+        )
+
+    _write_csv(
+        data_dir / "pseudo_pbr_projection.csv",
+        PSEUDO_PBR_PROJECTION_FIELDS,
+        projection_rows,
+        key_fields=("species", "mhc_class", "chain_role", "allele", "projection_id"),
+    )
+    return {
+        "pseudo_pbr_projection_components": len(projection_rows),
+        "pseudo_pbr_projection_pseudos": len(pseudo_rows),
+        "pseudo_pbr_projection_wildcard_components": wildcard_components,
+        "pseudo_pbr_projection_strict_components": strict_components,
+        "pseudo_pbr_projection_fallback_components": fallback_components,
+        "pseudo_pbr_projection_recovery_components": recovery_components,
+        "pseudo_pbr_projection_alignment_gap_components": alignment_gap_components,
+        "pseudo_pbr_projection_shifted_positions": shifted_position_count,
+        "pseudo_pbr_projection_alignment_gap_positions": alignment_gap_position_count,
+        "pseudo_pbr_projection_max_abs_shift": maximum_shift,
+        "pseudo_pbr_projection_coordinate_methods": dict(
+            sorted(coordinate_methods.items())
+        ),
+        "pseudo_pbr_projection_uncovered": 0,
+    }
+
+
 def pbr_metadata_fields() -> Dict[str, object]:
     return {
         "pbr_definitions": {
@@ -451,7 +775,12 @@ def pbr_metadata_fields() -> Dict[str, object]:
     }
 
 
-def update_pbr_metadata(data_dir: Path, strict_count: int, fallback_count: int) -> None:
+def update_pbr_metadata(
+    data_dir: Path,
+    strict_count: int,
+    fallback_count: int,
+    extra_counts: Optional[Mapping[str, object]] = None,
+) -> None:
     path = data_dir / "metadata.json"
     if not path.is_file():
         return
@@ -459,18 +788,30 @@ def update_pbr_metadata(data_dir: Path, strict_count: int, fallback_count: int) 
         metadata = json.load(handle)
     metadata.update(pbr_metadata_fields())
     metadata.setdefault("counts", {}).update(
-        {"pbr_total": strict_count, "fallback_pbr": fallback_count}
+        {
+            "pbr_total": strict_count,
+            "fallback_pbr": fallback_count,
+            **(dict(extra_counts) if extra_counts else {}),
+        }
     )
+    metadata["derived_artifacts_pending_rebuild"] = False
     with path.open("w", encoding="utf-8") as handle:
         json.dump(metadata, handle, ensure_ascii=False, indent=2, sort_keys=True)
         handle.write("\n")
 
 
-def build_pbr_files(data_dir: Path) -> Mapping[str, int]:
+def build_pbr_files(data_dir: Path) -> Mapping[str, object]:
     strict_count = build_strict_pbr_file(data_dir)
     fallback_count = build_fallback_pbr_file(data_dir)
-    update_pbr_metadata(data_dir, strict_count, fallback_count)
-    return {"pbr_total": strict_count, "fallback_pbr": fallback_count}
+    projection_counts = build_pseudo_pbr_projection_file(data_dir)
+    update_pbr_metadata(
+        data_dir, strict_count, fallback_count, projection_counts
+    )
+    return {
+        "pbr_total": strict_count,
+        "fallback_pbr": fallback_count,
+        **projection_counts,
+    }
 
 
 def main() -> int:

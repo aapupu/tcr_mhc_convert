@@ -1,6 +1,6 @@
 # MHC 转换审核、TCR 工具对比与 AF3 五链输入建议
 
-首次审核：2026-11-03；fallback 扩展复核：2026-11-20；PBR 与 NetMHC 4.2f/4.3k 扩展：2026-11-21
+首次审核：2026-11-03；fallback 扩展复核：2026-11-20；DTU pseudo 主来源与 PBR 硬覆盖复核：2026-11-21
 
 ## 结论
 
@@ -25,7 +25,7 @@
 - AF3 builder 曾有两个潜在错误：IPD 可视化 alignment 的 partial/stop-loss 行不能按普通空白切割；UniProt topology 也不能只按长度套到 alignment 第一行。现在 parser 保留对齐列，且每个 locus 必须先找到与 UniProt topology reference **全序列完全相同**的 IPD row，再向 exact deposited allele 投影。
 - AF3 provenance 现在一行对应一个 parent full record 和一个明确 `start-end`，避免 parent ID 列表与 span 列表失配。
 
-本轮扩展后保留 29,514 个 deposited protein records、13,484 个 strict AF3-ready chains、13,482 个 strict PBR chains 与 24,444 个 pseudo records（MHC-I 15,488；MHC-II 8,956）。严格 AF3/PBR 都验证为 parent 的连续子序列；无信号肽的 mouse I-A-s alpha 链 P14437 另按 reviewed UniProt 胞外 topology 验证。Pseudo 输出另有逐条 evidence、official-support、validation status、来源记录与质量标志。
+本轮扩展后保留 29,514 个 deposited protein records、13,484 个 strict AF3-ready chains、13,482 个 strict PBR chains 与 24,465 个 pseudo records（MHC-I 15,489；MHC-II 8,976）。严格 AF3/PBR 都验证为 parent 的连续子序列；无信号肽的 mouse I-A-s alpha 链 P14437 另按 reviewed UniProt 胞外 topology 验证。Pseudo 输出另有逐条 evidence、official-support、validation status、来源记录与质量标志。
 
 ## PBR 与 34-aa pseudo 的关系
 
@@ -34,29 +34,32 @@
 - MHC-I 输出一条连续 heavy-chain alpha1+alpha2，经典 HLA/H-2 通常 182 aa，不含 alpha3 与 B2M；
 - MHC-II 输出两条独立链：alpha1（人类常见 84–96 aa）与 beta1（90–95 aa），绝不人工拼接；
 - NetMHCpan-I 的 34 个接触位点全部位于 alpha1+alpha2；NetMHCIIpan-II 的 alpha15/beta19 全部位于各自 alpha1/beta1，因此 PBR 是提取与反向核验 pseudo 的合适连续上位表示；
+- 构建器要求每个 pseudo 组件的全部接触位点都能投影到一个 PBR；所有非 `X` 残基必须逐位相同，DTU `X` 只作为 alignment/unknown 通配符记录，绝不作为氨基酸写入蛋白链；
 - pMHC–TCR 的 AF3 默认仍使用完整可溶性胞外链。仅用 PBR 会省略膜近端稳定域，并可能暴露非天然截面；MHC-I 还会缺失 B2M。
 
 人类边界采用 reviewed UniProt domain REGION，并通过同位点 IPD alignment 投影到具体等位基因：MHC-I 182；DRA 84；DQA1 96（少数 indel 为 95）；DPA1 87；DRB1/3/4/5 95；DQB1 94；DPB1 92 aa。小鼠按具体 accession/位点投影，不把一个固定长度套到所有 H-2。
 
-## NetMHCpan 4.2f / NetMHCIIpan 4.3k 对齐
+## NetMHCpan 4.2e pseudo、4.2f support 与 NetMHCIIpan 4.3k 对齐
 
-项目提交了官方网页公开的支持名称快照及 SHA-256，而没有提交 DTU 可执行程序、模型文件或原始训练归档：
+项目提交了支持名称快照、用户提供的 DTU pseudosequence 文本及 SHA-256；不提交 DTU 可执行程序、模型文件或完整训练归档。NetMHCpan 的 `4.2e` 是 supplied pseudo artifact 的版本，`4.2f` 是独立 support list 的版本，两者不能混写：
 
-- NetMHCpan 4.2f：人/鼠审核范围 10,395 个支持名称，本地可为其中 8,743 个提供经审查的 34-aa 伪序列；
-- NetMHCIIpan 4.3k：DR、DPA1×DPB1、DQA1×DQB1 及小鼠共 11,344 个支持分子，本地可为其中 8,956 个提供经审查的 34-aa 伪序列；
-- 扩展 registry 共 24,444 行，其中 `derived_exact_pbr` 13,560、`derived_contact_complete_full` 89、`derived_contact_complete_partial` 7,223、`legacy_secondary` 3,572；组件 pseudo 4,386 条，另有 280 条冲突/不可接受记录隔离。
+- NetMHCpan 4.2f support：人/鼠审核范围 10,395 个支持名称，本地覆盖其中 8,744 个；
+- NetMHCIIpan 4.3k support：DR、DPA1×DPB1、DQA1×DQB1 及小鼠共 11,344 个支持分子，本地覆盖其中 8,976 个；
+- 扩展 registry 共 24,465 行：DTU 直接 pseudo 5,848、DTU component composition 3,339、`derived_exact_pbr` 10,808、`derived_contact_complete_partial` 3,844、`legacy_secondary` 626；组件 pseudo 4,390 条，另有 344 条冲突/不可接受记录隔离。
 
-构建顺序为：从 strict PBR 精确提取；其次允许 deposited full/partial，但必须覆盖全部接触列且不含 `X`、gap 或插补；最后保留无冲突的 legacy secondary。DTU training pseudo 只作为本地 validation oracle，不复制任何 oracle-only 行，也不存在捆绑的 `official_reference` evidence。Oracle 精确核验为 MHC-I `215/216`（只缺 `H-2-Kq`）和 MHC-II `5,565/5,631`。4 条有内部 indel 的 MHC-I 记录通过 oracle 在独立 alignment contact-column 候选间选择后安全恢复，sequence evidence 仍来自 deposited protein。任一接触位点缺失便停止，不用模板补出 pseudo。DQ/DP 的笛卡尔支持空间只代表模型允许的链组合，不代表 haplotype 或体内稳定性证据。
+DTU training pseudo 现在是直接主来源：216 条人/鼠 MHC-I 与 5,632 条人/鼠 MHC-II 行以 `dtu_official_pseudosequence` 证据进入 registry；由 DTU 认证的 MHC-II 链组件还能组合出 3,339 行。Deposited PBR/full/partial 派生与 legacy 行继续提供更广名称空间，但不能覆盖 DTU 直接值。`H-2-Kq` 因此不再缺失。DQ/DP 的笛卡尔支持空间只代表模型允许的链组合，不代表 haplotype 或体内稳定性证据。
 
-命名和冲突不静默处理：历史 `HLA-DQA1*01:07` 与 `HLA-DRB1*15:13` 分别解析为当前 `HLA-DQA1*01:07Q` 与 `HLA-DRB1*15:13Q`。`HLA-DRB1*13:10` 保留的是 PUFFIN/NetMHC-compatible `legacy_secondary` 序列 `ESSFDSYSIDKATYHVGFT`（`official_training_exact`），并标记它与 current-IPD-derived `ESSFDYFDIDKATYHVVFT` 的冲突；不能反过来写成保留 IPD 派生行。
+命名和冲突不静默处理：历史 `HLA-DQA1*01:07` 与 `HLA-DRB1*15:13` 分别解析为当前 `HLA-DQA1*01:07Q` 与 `HLA-DRB1*15:13Q`；compact `DRB1_13100` 解析为 `HLA-DRB1*13:100` 而非 `*131:00`。DTU pseudo 对 pseudo 表示具有优先级，但 current-IPD strict 蛋白/PBR 不会因此被篡改；冲突时生成带 synthetic/provenance 标记的兼容 PBR fallback，并且只有显式 `--require-pseudo-match` 才选用。
 
-`pseudo_components.csv` 的 4,386 行是“已解析且可独立证明的链组分”审计表，不是全部 MHC-II pair 的完整分解。共有 64 条保留的 `legacy_secondary` pair（4 个争议 DPB1 beta 组分 × 16 个 DPA1 alpha partner）；由于 legacy、current IPD 与本地 oracle 三类证据冲突，这些 pair 故意不向 component 表写入未解析 beta。Pair 级 pseudo 与 provenance 仍保留，但不能据此宣称争议 beta 已被单独验证。
+`pseudo_components.csv` 的 4,390 行是链组分审计表。4 个争议 DPB1 beta 组件按 DTU 直接值进入 pseudo registry；它们与 current deposited derivation 的冲突保留在质量标志与 quarantine 中。Pair 级 pseudo 与 provenance 均保留，但仍不能据此宣称某个 DP/DQ 组合具有生物学 haplotype 证据。
+
+`pseudo_pbr_projection.csv` 为每个唯一 pseudo chain component 保存选定 PBR、全部接触坐标、投影残基、`X` wildcard 位置及 strict/fallback 来源。构建时未覆盖组件数必须为 0；运行时 `allele-to-pbr`/`molecule-to-pbr --require-pseudo-match` 只返回该审计表认证的 PBR。MHC-II 的 alpha1 与 beta1 分别认证，任一链未通过都不能把整个分子报告为 pseudo-compatible。
 
 ## 基于 34-aa pseudo 的全面 fallback 复核
 
-扩展后的 34-aa registry 仍不能把 pseudo 唯一恢复成 full/PBR/AF3。15,478 个 human MHC-I 名称只对应 4,279 个唯一 pseudo；8,948 个 human MHC-II 分子只对应 1,695 个。
+扩展后的 34-aa registry 仍不能把 pseudo 唯一恢复成 full/PBR/AF3；多个名称可共享同一 34mer，且 pseudo 不定义接触位点以外的序列。
 
-Fallback 能提供可追踪的结构 scaffold，但不表示从 34 aa 恢复了真实全长。本版对 18,079 个 component targets 生成 13,217 条 full/fragment、6,626 条 AF3 与 6,626 条 PBR。Exact ectodomain 表示 deposited fragment 覆盖所选 AF3 全区，也不代表它同时覆盖 signal/TM/cytoplasmic precursor。
+Fallback 能提供可追踪的结构 scaffold，但不表示从 34 aa 恢复了真实全长。本次固定构建有 full/AF3/PBR fallback 13,219/6,628/6,628 条；18,080 个唯一 pseudo 组件全部具有 PBR 证书，其中 strict 11,559、fallback 6,521、未覆盖 0。坐标审计仅允许唯一且最大 1 aa 的恢复：17 个组件发生恢复，其中 12 个含 alignment-gap contact。Exact ectodomain 表示 deposited fragment 覆盖所选 AF3 全区，也不代表它同时覆盖 signal/TM/cytoplasmic precursor；机器可读的当前计数仍以 `metadata.json` 为准。
 
 多个等位基因可共享同一 34mer，且这些位置不能确定非 pseudo 区域或全部 TCR 接触面。因此 fallback 采用累积、默认关闭的四级策略：
 
@@ -130,7 +133,7 @@ Fallback 能提供可追踪的结构 scaffold，但不表示从 34 aa 恢复了�
 - human 等位基因命名规则： [WHO HLA nomenclature](https://hla.alleles.org/pages/nomenclature/naming_alleles/)；
 - mouse gene/allele/strain 命名以 MGI 为权威层级，MHC 名称/蛋白映射参考 [IMGT mouse MHC nomenclature](https://www.imgt.org/IMGTrepertoireMH/LocusGenes/nomenclatures/mouse/MHC/Mu_MHCnom.html)；
 - mouse/B2M 蛋白：显式 [UniProt](https://www.uniprot.org/) accession；
-- 34-aa 标准来源是上述 NetMHCpan/NetMHCIIpan 论文；支持名称使用 DTU 4.2f/4.3k 公开快照，pseudo evidence 只来自 PBR/full/partial 精确派生与 [PUFFIN public repository](https://github.com/gifford-lab/PUFFIN) legacy secondary。DTU training pseudo 仅作本地 oracle 核验，不复制 oracle-only 行。生成输出稳定排序且具有确定性；metadata/validation report 记录 source input 哈希，而不是宣称每个输出文件都有记录哈希。
+- 34-aa 标准来源是上述 NetMHCpan/NetMHCIIpan 论文；支持名称使用 DTU 4.2f/4.3k 公开快照；随库保存的 NetMHCpan 4.2e training pseudo 与 NetMHCIIpan 4.3k `pseudosequence.2023.dat` 是直接主来源。PBR/full/partial 精确派生及 [PUFFIN public repository](https://github.com/gifford-lab/PUFFIN) legacy secondary 用于扩展名称空间。生成输出稳定排序且具有确定性；metadata/validation report 记录 source input 哈希，而不是宣称每个输出文件都有记录哈希。
 
 MHCflurry 是 MHC-I-only，并同时存在 34/37/39 位 artifact；34 位是 NetMHCpan-derived 表示，37/39 位是其他模型表示。模型权重依赖精确定义，不能只看“pseudo”字段名就互换。其实现说明见 [MHCflurry pseudosequences module](https://openvax.github.io/mhcflurry/_modules/mhcflurry/pseudosequences.html)。
 

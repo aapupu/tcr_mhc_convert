@@ -1710,27 +1710,19 @@ def build(args: argparse.Namespace) -> None:
         json.dump(metadata, handle, ensure_ascii=False, indent=2, sort_keys=True)
         handle.write("\n")
 
-    if args.netmhcpan_training_pseudo:
-        from build_netmhc_pseudo_reference import build as build_netmhc_pseudos
+    from build_netmhc_pseudo_reference import build as build_netmhc_pseudos
 
-        build_netmhc_pseudos(
-            argparse.Namespace(
-                data_dir=output_dir,
-                supported_i=args.netmhcpan_support_list.resolve(),
-                supported_ii=args.netmhciipan_support_list.resolve(),
-                official_pseudo_i=args.netmhcpan_training_pseudo.resolve(),
-                official_pseudo_ii=args.netmhciipan_training_pseudo.resolve(),
-            )
+    build_netmhc_pseudos(
+        argparse.Namespace(
+            data_dir=output_dir,
+            supported_i=args.netmhcpan_support_list.resolve(),
+            supported_ii=args.netmhciipan_support_list.resolve(),
+            official_pseudo_i=args.netmhcpan_training_pseudo.resolve(),
+            official_pseudo_ii=args.netmhciipan_training_pseudo.resolve(),
         )
-        with (output_dir / "metadata.json").open("r", encoding="utf-8") as handle:
-            metadata = json.load(handle)
-    else:
-        # A baseline-only rebuild must not leave audit assets from a previous
-        # enhanced overlay beside the newly reset pseudo registry.
-        for stale_name in ("pseudo_components.csv", "pseudo_validation.json"):
-            stale_path = output_dir / stale_name
-            if stale_path.is_file():
-                stale_path.unlink()
+    )
+    with (output_dir / "metadata.json").open("r", encoding="utf-8") as handle:
+        metadata = json.load(handle)
 
     # Fallback construction intentionally runs only after the strict registry
     # and its preliminary metadata are complete.  It reads those immutable
@@ -1740,6 +1732,7 @@ def build(args: argparse.Namespace) -> None:
     fallback_counts = build_fallback_files(output_dir)
     metadata.update(fallback_metadata_fields())
     metadata["counts"].update(fallback_counts)
+    metadata["derived_artifacts_pending_rebuild"] = False
     with (output_dir / "metadata.json").open("w", encoding="utf-8") as handle:
         json.dump(metadata, handle, ensure_ascii=False, indent=2, sort_keys=True)
         handle.write("\n")
@@ -1779,12 +1772,20 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument(
         "--netmhcpan-training-pseudo",
         type=Path,
-        help="optional locally fetched DTU training pseudo file used only as a validation gate",
+        default=(
+            project_root
+            / "tools/reference/NetMHCpan-4.2e-training-pseudoseqs.dat"
+        ),
+        help="DTU NetMHCpan pseudosequence source (defaults to bundled snapshot)",
     )
     result.add_argument(
         "--netmhciipan-training-pseudo",
         type=Path,
-        help="matching local DTU training pseudo file used only as a validation gate",
+        default=(
+            project_root
+            / "tools/reference/NetMHCIIpan-4.3k-training-pseudosequence.2023.dat"
+        ),
+        help="DTU NetMHCIIpan pseudosequence source (defaults to bundled snapshot)",
     )
     result.add_argument("--offline", action="store_true")
     return result

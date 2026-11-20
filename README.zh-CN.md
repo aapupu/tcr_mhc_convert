@@ -48,6 +48,10 @@ mhctransform molecule-to-pbr 'HLA-A*02:01' --class I
 mhctransform molecule-to-pbr \
   'HLA-DRA*01:01/HLA-DRB1*15:01' --class II
 
+# 要求 PBR 的接触位点逐位复现 DTU pseudo
+mhctransform molecule-to-pbr 'HLA-A*02:01' \
+  --class I --require-pseudo-match
+
 # 稀有等位基因：保留 deposited 残基，只补齐 AF3 缺失位置
 mhctransform molecule-to-af3 'HLA-B*08:03' \
   --class I --fallback imputed
@@ -112,4 +116,4 @@ tcr_mhc_convert/
 
 ## 许可证与数据条款
 
-本仓库代码采用 [MIT License](LICENSE)。每个子项目的 `NOTICE.md` 和数据目录元数据记录了 IPD-IMGT/HLA、UniProt、tcrdist3、NetMHCpan 4.2f/NetMHCIIpan 4.3k 公开支持清单及旧 PUFFIN 镜像等来源、固定版本和校验值。MIT 许可证只适用于本仓库代码，不会重新许可所捆绑或派生的生物参考数据；本仓库不分发 DTU 可执行程序、模型文件、原始训练归档或 oracle-only pseudo 行。再分发数据前请核对各上游条款。
+本仓库代码采用 [MIT License](LICENSE)。每个子项目的 `NOTICE.md` 和数据目录元数据记录了 IPD-IMGT/HLA、UniProt、tcrdist3、NetMHCpan 4.2f/NetMHCIIpan 4.3k 公开支持清单、随库保存的 NetMHCpan 4.2e/NetMHCIIpan 4.3k pseudosequence 快照及旧 PUFFIN 镜像等来源、固定版本和校验值。DTU pseudosequence 文本是 MHC registry 的直接主输入；仓库不分发 DTU 可执行程序、模型文件或完整训练归档。MIT 许可证只适用于本仓库代码，不会重新许可所捆绑或派生的生物参考数据。再分发数据前请核对各上游条款。

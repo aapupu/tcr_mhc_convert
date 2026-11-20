@@ -8,6 +8,8 @@ constants used by the offline fallback builder and runtime filtering.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
+from functools import lru_cache
 from typing import Dict, Iterable, Mapping, Sequence, Tuple
 
 from .errors import MHCTransformError
@@ -111,11 +113,19 @@ def expand_positions(spans: str) -> Tuple[int, ...]:
     return tuple(sorted(set(positions)))
 
 
+@lru_cache(maxsize=4096)
 def global_alignment_map(reference: str, target: str) -> Mapping[int, int]:
     """Map 1-based reference residues onto a homologous target sequence."""
 
     n, m = len(reference), len(target)
-    gap = -2
+    # MHC alleles are substitution-rich but short internal indels are rare.
+    # A weak gap penalty can invent a compensating delete/insert pair merely
+    # to avoid a few polymorphisms (for example around HLA-B positions 80-81),
+    # shifting otherwise homologous contact coordinates.  Keep this in step
+    # with ``local_alignment_map``: a real one-residue indel still wins over
+    # hundreds of downstream mismatches, while substitution-only alleles stay
+    # on the same coordinate frame.
+    gap = -8
     scores = [[0] * (m + 1) for _ in range(n + 1)]
     trace = [[0] * (m + 1) for _ in range(n + 1)]
     for i in range(1, n + 1):
@@ -152,53 +162,197 @@ def global_alignment_map(reference: str, target: str) -> Mapping[int, int]:
     return mapping
 
 
+@dataclass(frozen=True)
+class ContactProjection:
+    """Auditable projection of pseudo contact sites onto a protein sequence."""
+
+    positions: Tuple[int, ...]
+    anchors: Tuple[int, ...]
+    alignment_gap_pseudo_positions: Tuple[int, ...]
+    shifted_pseudo_positions: Tuple[int, ...]
+    coordinate_offsets: Tuple[int, ...]
+    coordinate_method: str
+    max_abs_shift: int
+
+
+def _interpolated_alignment_position(
+    reference_position: int,
+    mapping: Mapping[int, int],
+    target_length: int,
+) -> int:
+    """Interpolate a target coordinate when a reference contact maps to a gap."""
+
+    left = max(
+        (position for position in mapping if position < reference_position),
+        default=None,
+    )
+    right = min(
+        (position for position in mapping if position > reference_position),
+        default=None,
+    )
+    if left is None and right is None:
+        raise ValueError(
+            f"cannot interpolate reference contact position {reference_position}"
+        )
+    estimates = []
+    if left is not None:
+        estimates.append(mapping[left] + reference_position - left)
+    if right is not None:
+        estimates.append(mapping[right] - (right - reference_position))
+    # All coordinates are positive.  Integer division after adding half the
+    # denominator implements deterministic round-half-up for two estimates.
+    estimate = (sum(estimates) + len(estimates) // 2) // len(estimates)
+    return max(1, min(estimate, target_length))
+
+
+def project_contact_positions(
+    reference_sequence: str,
+    target_sequence: str,
+    reference_positions: Sequence[int],
+    target_pseudo_segment: str,
+) -> ContactProjection:
+    """Project contacts with bounded, explicitly audited residue recovery.
+
+    Alignment is the coordinate authority.  A reference contact aligned to a
+    gap is linearly interpolated from its nearest mapped neighbours.  A non-X
+    pseudo residue may recover at most one position away, and only when the
+    bounded candidate is unique.  ``X`` is a wildcard used to certify the
+    coordinate; it is never inserted into a protein sequence.
+    """
+
+    if len(reference_positions) != len(target_pseudo_segment):
+        raise ValueError("contact position and pseudosequence lengths differ")
+    if len(target_sequence) < len(reference_positions):
+        raise ValueError("target sequence is shorter than the contact set")
+
+    mapping = global_alignment_map(reference_sequence, target_sequence)
+    anchors = []
+    gap_positions = []
+    for pseudo_index, reference_position in enumerate(reference_positions, start=1):
+        if reference_position in mapping:
+            anchor = mapping[reference_position]
+        else:
+            anchor = _interpolated_alignment_position(
+                reference_position, mapping, len(target_sequence)
+            )
+            gap_positions.append(pseudo_index)
+        anchors.append(anchor)
+
+    candidate_sets = []
+    for index, (anchor, residue) in enumerate(
+        zip(anchors, target_pseudo_segment), start=1
+    ):
+        lower = max(1, anchor - 1)
+        upper = min(len(target_sequence), anchor + 1)
+        if residue == "X":
+            candidates = tuple(range(lower, upper + 1))
+        elif target_sequence[anchor - 1] == residue:
+            # The alignment anchor is authoritative when it already matches;
+            # nearby repeated residues must not create artificial ambiguity.
+            candidates = (anchor,)
+        else:
+            candidates = tuple(
+                position
+                for position in range(lower, upper + 1)
+                if target_sequence[position - 1] == residue
+            )
+        if not candidates:
+            raise ValueError(
+                f"cannot locate pseudo residue {index}={residue} within 1 aa "
+                f"of alignment anchor {anchor}"
+            )
+        candidate_sets.append(candidates)
+
+    # Resolve repeated residues and wildcard coordinates as one global,
+    # strictly increasing assignment.  This avoids a greedy choice at one
+    # contact stealing the only valid coordinate from the next.  An assignment
+    # is accepted only when its minimum-total-shift solution is unique.
+    # state value: (cost, coordinate path, number of equal-cost paths capped at 2)
+    states: Dict[int, Tuple[int, Tuple[int, ...], int]] = {0: (0, (), 1)}
+    for index, (anchor, candidates) in enumerate(
+        zip(anchors, candidate_sets), start=1
+    ):
+        next_states: Dict[int, Tuple[int, Tuple[int, ...], int]] = {}
+        for previous, (cost, path, path_count) in states.items():
+            for chosen in candidates:
+                if chosen <= previous:
+                    continue
+                new_cost = cost + abs(chosen - anchor)
+                new_path = (*path, chosen)
+                existing = next_states.get(chosen)
+                if existing is None or new_cost < existing[0]:
+                    next_states[chosen] = (new_cost, new_path, path_count)
+                elif new_cost == existing[0]:
+                    next_states[chosen] = (
+                        existing[0],
+                        existing[1],
+                        min(2, existing[2] + path_count),
+                    )
+        if not next_states:
+            raise ValueError(
+                f"cannot preserve contact order at pseudo position {index}"
+            )
+        states = next_states
+
+    minimum_cost = min(value[0] for value in states.values())
+    best = [value for value in states.values() if value[0] == minimum_cost]
+    solution_count = sum(value[2] for value in best)
+    if solution_count != 1:
+        raise ValueError(
+            "ambiguous bounded contact recovery: "
+            f"{solution_count} minimum-shift assignments"
+        )
+    located = best[0][1]
+    offsets = tuple(
+        chosen - anchor for chosen, anchor in zip(located, anchors)
+    )
+    shifted_positions = tuple(
+        index
+        for index, offset in enumerate(offsets, start=1)
+        if offset
+    )
+
+    observed = "".join(target_sequence[position - 1] for position in located)
+    for expected_residue, observed_residue in zip(target_pseudo_segment, observed):
+        if expected_residue != "X" and expected_residue != observed_residue:
+            raise ValueError("projected positions do not reproduce the donor pseudo")
+
+    if gap_positions and shifted_positions:
+        method = "global_alignment_gap_interpolation_and_bounded_recovery"
+    elif gap_positions:
+        method = "global_alignment_gap_interpolation"
+    elif shifted_positions:
+        method = "global_alignment_bounded_recovery"
+    else:
+        method = "global_alignment"
+    return ContactProjection(
+        positions=tuple(located),
+        anchors=tuple(anchors),
+        alignment_gap_pseudo_positions=tuple(gap_positions),
+        shifted_pseudo_positions=shifted_positions,
+        coordinate_offsets=offsets,
+        coordinate_method=method,
+        max_abs_shift=max((abs(value) for value in offsets), default=0),
+    )
+
+
 def locate_contact_positions(
     reference_sequence: str,
     target_sequence: str,
     reference_positions: Sequence[int],
     target_pseudo_segment: str,
 ) -> Tuple[int, ...]:
-    """Project published positions and verify them against a donor pseudo."""
+    """Backward-compatible coordinate-only contact projection helper."""
 
-    if len(reference_positions) != len(target_pseudo_segment):
-        raise ValueError("contact position and pseudosequence lengths differ")
-    mapping = global_alignment_map(reference_sequence, target_sequence)
-    expected = []
-    for position in reference_positions:
-        if position not in mapping:
-            raise ValueError(f"reference contact position {position} maps to a gap")
-        expected.append(mapping[position])
-
-    located = []
-    previous = 0
-    for index, (projected, residue) in enumerate(zip(expected, target_pseudo_segment)):
-        remaining = len(expected) - index - 1
-        upper_order_bound = len(target_sequence) - remaining
-        if residue == "X":
-            chosen = max(previous + 1, min(projected, upper_order_bound))
-        else:
-            candidates = [
-                position
-                for position in range(previous + 1, upper_order_bound + 1)
-                if target_sequence[position - 1] == residue
-                and abs(position - projected) <= 8
-            ]
-            if not candidates:
-                raise ValueError(
-                    f"cannot locate pseudo residue {index + 1}={residue} near "
-                    f"target position {projected}"
-                )
-            chosen = min(candidates, key=lambda position: (abs(position - projected), position))
-        located.append(chosen)
-        previous = chosen
-
-    observed = "".join(target_sequence[position - 1] for position in located)
-    for expected_residue, observed_residue in zip(target_pseudo_segment, observed):
-        if expected_residue != "X" and expected_residue != observed_residue:
-            raise ValueError("projected positions do not reproduce the donor pseudo")
-    return tuple(located)
+    return project_contact_positions(
+        reference_sequence,
+        target_sequence,
+        reference_positions,
+        target_pseudo_segment,
+    ).positions
 
 
+@lru_cache(maxsize=4096)
 def local_alignment_map(query: str, target: str) -> Mapping[int, int]:
     """Return a 1-based Smith-Waterman query-to-target residue map."""
 
@@ -242,6 +396,7 @@ def local_alignment_map(query: str, target: str) -> Mapping[int, int]:
     return mapping
 
 
+@lru_cache(maxsize=4096)
 def apply_observed_sequence(
     scaffold: str,
     observed_sequence: str,

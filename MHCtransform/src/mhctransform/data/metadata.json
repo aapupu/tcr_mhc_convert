@@ -39,10 +39,10 @@
     },
     "af3_excluded_complete": 348,
     "af3_total": 13484,
-    "component_targets": 18079,
-    "fallback_af3": 6626,
-    "fallback_full": 13217,
-    "fallback_pbr": 6626,
+    "component_targets": 18080,
+    "fallback_af3": 6628,
+    "fallback_full": 13219,
+    "fallback_pbr": 6628,
     "full_by_species_class": {
       "human/I": 20066,
       "human/II": 9419,
@@ -51,28 +51,46 @@
     },
     "full_complete": 13831,
     "full_total": 29514,
-    "netmhciipan_supported_available": 8956,
+    "netmhciipan_supported_available": 8976,
     "netmhciipan_supported_total": 11344,
-    "netmhcpan_supported_available": 8743,
+    "netmhcpan_supported_available": 8744,
     "netmhcpan_supported_total": 10395,
     "pairs": 8,
     "pbr_total": 13482,
     "pseudo_by_evidence": {
-      "derived_contact_complete_full": 89,
-      "derived_contact_complete_partial": 7223,
-      "derived_exact_pbr": 13560,
-      "legacy_secondary": 3572
+      "derived_contact_complete_partial": 3844,
+      "derived_exact_pbr": 10808,
+      "dtu_official_component_composition": 3339,
+      "dtu_official_pseudosequence": 5848,
+      "legacy_secondary": 626
     },
     "pseudo_by_species_class": {
       "human/I": 15478,
-      "human/II": 8948,
-      "mouse/I": 10,
+      "human/II": 8968,
+      "mouse/I": 11,
       "mouse/II": 8
     },
-    "pseudo_components": 4386,
-    "pseudo_quarantined": 280,
-    "pseudo_total": 24444
+    "pseudo_components": 4390,
+    "pseudo_pbr_projection_alignment_gap_components": 12,
+    "pseudo_pbr_projection_alignment_gap_positions": 12,
+    "pseudo_pbr_projection_components": 18080,
+    "pseudo_pbr_projection_coordinate_methods": {
+      "global_alignment": 18063,
+      "global_alignment_bounded_recovery": 5,
+      "global_alignment_gap_interpolation_and_bounded_recovery": 12
+    },
+    "pseudo_pbr_projection_fallback_components": 6521,
+    "pseudo_pbr_projection_max_abs_shift": 1,
+    "pseudo_pbr_projection_pseudos": 24465,
+    "pseudo_pbr_projection_recovery_components": 17,
+    "pseudo_pbr_projection_shifted_positions": 17,
+    "pseudo_pbr_projection_strict_components": 11559,
+    "pseudo_pbr_projection_uncovered": 0,
+    "pseudo_pbr_projection_wildcard_components": 18,
+    "pseudo_quarantined": 344,
+    "pseudo_total": 24465
   },
+  "derived_artifacts_pending_rebuild": false,
   "fallback_definitions": {
     "af3-soluble-extracellular-imputed-v1": "Synthetic AF3 ectodomain scaffold with deposited-observed and non-observed/imputed spans.",
     "policy_order": [
@@ -585,19 +603,24 @@
       "DRB5": "HLA-DRB5*01:01"
     },
     "priority": [
-      "official training validation of independently reconstructed rows",
+      "bundled DTU official training pseudosequence",
       "derived exact PBR",
       "contact-complete deposited sequence",
       "pinned secondary mirror compatibility row"
     ],
     "validation_file": "pseudo_validation.json"
   },
+  "pseudo_pbr_contract": {
+    "failure_policy": "Any uncovered component or non-X mismatch fails the build.",
+    "projection_file": "pseudo_pbr_projection.csv",
+    "rule": "Every pseudo component must map all contact indices to one strict or explicit fallback PBR. Every non-X pseudo residue must match the projected PBR residue exactly. DTU X alignment/unknown tokens are recorded as explicit wildcards and are never inserted into a protein chain."
+  },
   "quarantine": {
-    "count": 280,
+    "count": 344,
     "file": "quarantined_pseudosequences.csv",
     "rule": "Preserve fixed legacy-source conflicts and recompute current secondary-vs-derived conflicts on every overlay build; never silently select two sequences for one canonical name."
   },
-  "schema_version": 4,
+  "schema_version": 5,
   "sequence_kind": "precursor_full (strict default); partial_deposited_protein (legacy opt-in); af3-soluble-extracellular-v1 (strict mature extracellular chain); source-partial-v1; precursor-imputed-v1; af3-soluble-extracellular-imputed-v1 (all fallback representations require explicit opt-in)",
   "sources": {
     "af3_human_alignments": {
@@ -725,12 +748,21 @@
       "sha256": "ab801102d204e11362f236bac1553c3c850dad9abf26e84ad8898ee486d77fa1",
       "url": "https://rest.uniprot.org/"
     },
-    "netmhc_training_pseudo_validation": {
-      "bundled": false,
+    "netmhc_training_pseudosequences": {
+      "bundled_in_runtime_wheel": false,
+      "bundled_in_source_repository": true,
+      "netmhciipan_file": "NetMHCIIpan-4.3k-training-pseudosequence.2023.dat",
+      "netmhciipan_human_mouse_rows": 5632,
       "netmhciipan_sha256": "daf3b7d693e76d8e8102c374d130467ff1ef7f9311064a730d56a753a3d514b5",
+      "netmhciipan_source_page": "https://services.healthtech.dtu.dk/services/NetMHCIIpan-4.3/",
+      "netmhciipan_source_version": "NetMHCIIpan-4.3k pseudosequence.2023",
+      "netmhcpan_file": "NetMHCpan-4.2e-training-pseudoseqs.dat",
+      "netmhcpan_human_mouse_rows": 216,
       "netmhcpan_sha256": "bb8fe764cd187e55d7f83a465eef152419151ad9924825c411ba4e8ed84ef5a7",
-      "purpose": "local validation gate only",
-      "rows_copied_into_registry": false,
+      "netmhcpan_source_page": "https://services.healthtech.dtu.dk/services/NetMHCpan-4.2/",
+      "netmhcpan_source_version": "NetMHCpan-4.2e training pseudoseqs",
+      "rows_used_as_primary_source": true,
+      "scope_note": "Only human and mouse rows enter this registry; other species remain in the attributed source snapshot but are excluded from runtime data.",
       "upstream_last_modified": "2026-07-06"
     },
     "netmhciipan_4_3_supported_names": {

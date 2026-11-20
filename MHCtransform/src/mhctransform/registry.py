@@ -153,6 +153,12 @@ class MHCRegistry:
             if fallback_pbr_path.is_file()
             else ()
         )
+        pseudo_pbr_projection_path = data_root.joinpath("pseudo_pbr_projection.csv")
+        self._pseudo_pbr_projections = (
+            self._load_pairs(pseudo_pbr_projection_path)
+            if pseudo_pbr_projection_path.is_file()
+            else ()
+        )
         with data_root.joinpath("metadata.json").open("r", encoding="utf-8") as handle:
             self.metadata: Mapping[str, object] = json.load(handle)
 
@@ -228,6 +234,230 @@ class MHCRegistry:
             for name in _index_names(candidate.allele, candidate.aliases):
                 self._fallback_pbr_name_index[exact_name_key(name)].append(candidate)
             self._fallback_pbr_value_index[candidate.sequence].append(candidate)
+
+        if self._pseudo_pbr_projections:
+            self._validate_pseudo_pbr_projections()
+
+        # The projection table is a build-time certificate, not another
+        # sequence source.  It records the one strict or fallback PBR record
+        # whose projected contact coordinates reproduce each pseudo component.
+        # Indexing by the component name prevents a strict record certified for
+        # one allele from accidentally satisfying a conflicting allele that
+        # happens to share the same deposited protein sequence.
+        self._pseudo_pbr_projection_name_index: DefaultDict[
+            str, List[Mapping[str, str]]
+        ] = defaultdict(list)
+        projection_by_allele: DefaultDict[str, List[Mapping[str, str]]] = defaultdict(list)
+        for projection in self._pseudo_pbr_projections:
+            projection_by_allele[exact_name_key(projection["allele"])].append(projection)
+            for name in _index_names(projection["allele"], ()):
+                self._pseudo_pbr_projection_name_index[exact_name_key(name)].append(
+                    projection
+                )
+
+        # Preserve explicit historical/legacy aliases for MHC-I pseudo names.
+        # MHC-II projection queries are component queries and are indexed by
+        # alpha_allele/beta_allele directly above.
+        for pseudo in self._pseudos:
+            if pseudo.mhc_class != "I":
+                continue
+            rows = projection_by_allele.get(exact_name_key(pseudo.canonical_name), ())
+            for alias in _index_names(pseudo.canonical_name, pseudo.aliases):
+                self._pseudo_pbr_projection_name_index[exact_name_key(alias)].extend(rows)
+
+    def _validate_pseudo_pbr_projections(self) -> None:
+        """Reject stale or internally inconsistent pseudo/PBR certificates.
+
+        The projection CSV spans three generated registries.  Validating it at
+        load time prevents a partially rebuilt data directory from making
+        ``require_pseudo_match=True`` trust a certificate for an older pseudo
+        or PBR file.
+        """
+
+        expected: DefaultDict[
+            Tuple[str, str, str, str], Dict[str, object]
+        ] = defaultdict(lambda: {"segments": set(), "record_ids": set()})
+        for pseudo in self._pseudos:
+            if pseudo.mhc_class == "I":
+                components = (
+                    ("heavy", pseudo.canonical_name, pseudo.pseudo_sequence, 1),
+                )
+            else:
+                components = (
+                    ("alpha", pseudo.alpha_allele, pseudo.pseudo_sequence[:15], 1),
+                    ("beta", pseudo.beta_allele, pseudo.pseudo_sequence[15:], 16),
+                )
+            for role, allele, segment, start in components:
+                key = (pseudo.species, pseudo.mhc_class, role, exact_name_key(allele))
+                item = expected[key]
+                item["segments"].add((segment, start))  # type: ignore[union-attr]
+                item["record_ids"].add(pseudo.record_id)  # type: ignore[union-attr]
+
+        strict_by_id = {item.record_id: item for item in self._pbr_sequences}
+        fallback_by_id = {
+            item.record_id: item for item in self._fallback_pbr_sequences
+        }
+        seen: Dict[Tuple[str, str, str, str], str] = {}
+
+        def fail(detail: str) -> None:
+            raise MHCTransformError(
+                "invalid or stale pseudo/PBR projection certificate: "
+                f"{detail}. Rebuild the fallback/PBR reference data."
+            )
+
+        for row in self._pseudo_pbr_projections:
+            key = (
+                row["species"],
+                row["mhc_class"],
+                row["chain_role"],
+                exact_name_key(row["allele"]),
+            )
+            if key in seen:
+                fail(f"duplicate component {row['allele']}")
+            seen[key] = row["projection_id"]
+            target = expected.get(key)
+            if target is None:
+                fail(f"unknown component {row['allele']}")
+            segments = target["segments"]
+            if len(segments) != 1:
+                fail(f"conflicting current pseudo segments for {row['allele']}")
+            segment, start = next(iter(segments))  # type: ignore[arg-type]
+            if row["pseudo_segment"] != segment:
+                fail(f"pseudo segment changed for {row['allele']}")
+            if int(row["pseudo_start_1based"]) != start:
+                fail(f"pseudo offset changed for {row['allele']}")
+
+            source = row["pbr_source"]
+            source_index = strict_by_id if source == "strict" else fallback_by_id
+            if source not in {"strict", "fallback"}:
+                fail(f"unknown PBR source {source!r} for {row['allele']}")
+            candidate = source_index.get(row["pbr_record_id"])
+            if candidate is None:
+                fail(f"missing PBR record for {row['allele']}")
+            if (
+                candidate.species != row["species"]
+                or candidate.mhc_class != row["mhc_class"]
+                or candidate.chain_role != row["chain_role"]
+                or candidate.definition_id != row["definition_id"]
+            ):
+                fail(f"PBR metadata changed for {row['allele']}")
+
+            raw_coordinates = [
+                value
+                for value in row["contact_positions_1based"].split(";")
+                if value
+            ]
+            try:
+                coordinates = tuple(int(value) for value in raw_coordinates)
+            except ValueError:
+                fail(f"invalid PBR coordinates for {row['allele']}")
+                return
+            if (
+                len(coordinates) != len(segment)
+                or tuple(sorted(set(coordinates))) != coordinates
+                or not coordinates
+                or coordinates[0] < 1
+                or coordinates[-1] > len(candidate.sequence)
+            ):
+                fail(f"incomplete PBR coordinates for {row['allele']}")
+            projected = "".join(
+                candidate.sequence[position - 1] for position in coordinates
+            )
+            if projected != row["projected_segment"]:
+                fail(f"projected PBR residues changed for {row['allele']}")
+            if "X" in projected:
+                fail(f"PBR projection contains X for {row['allele']}")
+            if any(
+                pseudo_residue != "X" and pseudo_residue != pbr_residue
+                for pseudo_residue, pbr_residue in zip(segment, projected)
+            ):
+                fail(f"non-X PBR mismatch for {row['allele']}")
+            wildcard_positions = ";".join(
+                str(start + index)
+                for index, residue in enumerate(segment)
+                if residue == "X"
+            )
+            if row["wildcard_pseudo_positions"] != wildcard_positions:
+                fail(f"X wildcard positions changed for {row['allele']}")
+            expected_coverage = (
+                "exact_non_x_with_explicit_wildcards"
+                if "X" in segment
+                else "exact"
+            )
+            if row["coverage_status"] != expected_coverage:
+                fail(f"coverage status changed for {row['allele']}")
+
+            try:
+                offsets = tuple(
+                    int(value) for value in row["coordinate_offsets"].split(";")
+                )
+                shifted = tuple(
+                    int(value)
+                    for value in row["shifted_pseudo_positions"].split(";")
+                    if value
+                )
+                gaps = tuple(
+                    int(value)
+                    for value in row["alignment_gap_pseudo_positions"].split(";")
+                    if value
+                )
+                maximum_shift = int(row["max_abs_shift"])
+            except (KeyError, ValueError):
+                fail(f"invalid coordinate audit for {row['allele']}")
+                return
+            if len(offsets) != len(segment) or any(abs(value) > 1 for value in offsets):
+                fail(f"out-of-contract coordinate offsets for {row['allele']}")
+            expected_shifted = tuple(
+                start + index
+                for index, offset in enumerate(offsets)
+                if offset
+            )
+            if shifted != expected_shifted:
+                fail(f"shifted coordinate audit changed for {row['allele']}")
+            valid_pseudo_positions = set(range(start, start + len(segment)))
+            if not set(gaps).issubset(valid_pseudo_positions):
+                fail(f"alignment-gap audit is out of range for {row['allele']}")
+            if maximum_shift != max((abs(value) for value in offsets), default=0):
+                fail(f"maximum coordinate shift changed for {row['allele']}")
+            expected_method = (
+                "global_alignment_gap_interpolation_and_bounded_recovery"
+                if gaps and shifted
+                else (
+                    "global_alignment_gap_interpolation"
+                    if gaps
+                    else (
+                        "global_alignment_bounded_recovery"
+                        if shifted
+                        else "global_alignment"
+                    )
+                )
+            )
+            if row["coordinate_method"] != expected_method:
+                fail(f"coordinate method changed for {row['allele']}")
+
+            record_ids = target["record_ids"]
+            if int(row["pseudo_record_count"]) != len(record_ids):  # type: ignore[arg-type]
+                fail(f"pseudo usage count changed for {row['allele']}")
+            if row["representative_pseudo_record_id"] not in record_ids:
+                fail(f"representative pseudo changed for {row['allele']}")
+
+        missing = sorted(set(expected) - set(seen))
+        extra = sorted(set(seen) - set(expected))
+        if missing or extra:
+            detail = (
+                f"component coverage changed (missing={len(missing)}, "
+                f"extra={len(extra)})"
+            )
+            fail(detail)
+
+        counts = self.metadata.get("counts", {})
+        if isinstance(counts, Mapping):
+            declared_components = counts.get("pseudo_pbr_projection_components")
+            declared_pseudos = counts.get("pseudo_pbr_projection_pseudos")
+            if declared_components is not None and int(declared_components) != len(seen):
+                fail("metadata projection component count changed")
+            if declared_pseudos is not None and int(declared_pseudos) != len(self._pseudos):
+                fail("metadata projection pseudo count changed")
 
     @staticmethod
     def _load_sequences(path: object) -> Tuple[SequenceCandidate, ...]:
@@ -564,6 +794,31 @@ class MHCRegistry:
             if evidence_priority(policy, getattr(candidate, "evidence_level"))
             == best_rank
         )
+
+    def _pseudo_pbr_certificates(
+        self,
+        name_key: str,
+        *,
+        mhc_class: str | None,
+        species: str | None,
+        definition_id: str | None,
+    ) -> Tuple[Mapping[str, str], ...]:
+        """Return build-certified pseudo/PBR projections for one component."""
+
+        expected_class = normalize_mhc_class(mhc_class) if mhc_class else None
+        expected_species = species.lower().strip() if species else None
+        if expected_species and expected_species not in {"human", "mouse"}:
+            raise MHCTransformError("species must be human or mouse")
+        unique: Dict[str, Mapping[str, str]] = {}
+        for row in self._pseudo_pbr_projection_name_index.get(name_key, ()):
+            if expected_class is not None and row["mhc_class"] != expected_class:
+                continue
+            if expected_species is not None and row["species"] != expected_species:
+                continue
+            if definition_id is not None and row["definition_id"] != definition_id:
+                continue
+            unique[row["projection_id"]] = row
+        return tuple(unique[key] for key in sorted(unique))
 
     def allele_to_sequence(
         self,
@@ -948,8 +1203,16 @@ class MHCRegistry:
         allow_two_field_projection: bool = False,
         fallback: str = "none",
         allow_expression_qualified: bool = False,
+        require_pseudo_match: bool = False,
     ) -> QueryResult:
-        """Convert a chain allele/name to a contiguous peptide-binding region."""
+        """Convert a chain allele/name to a contiguous peptide-binding region.
+
+        ``require_pseudo_match`` is an explicit compatibility mode.  It returns
+        only the strict or fallback PBR record selected by the build-time
+        pseudo/PBR projection contract.  The flag itself authorizes a certified
+        synthetic fallback when the strict biological PBR conflicts with the
+        DTU pseudo; normal calls keep the historical strict-first behaviour.
+        """
 
         fallback_policy = normalize_fallback_policy(fallback)
         query_key = exact_name_key(allele)
@@ -996,7 +1259,89 @@ class MHCRegistry:
                 )
 
         fallback_candidates: Tuple[object, ...] = ()
-        if not candidates and fallback_policy != "none":
+        contract_policy = "pseudo-scaffold"
+        if require_pseudo_match:
+            certificates = self._pseudo_pbr_certificates(
+                fallback_key,
+                mhc_class=mhc_class,
+                species=species,
+                definition_id=definition_id,
+            )
+            strict_ids = {
+                row["pbr_record_id"]
+                for row in certificates
+                if row["pbr_source"] == "strict"
+            }
+            fallback_ids = {
+                row["pbr_record_id"]
+                for row in certificates
+                if row["pbr_source"] == "fallback"
+            }
+            candidates = tuple(
+                candidate
+                for candidate in candidates
+                if candidate.record_id in strict_ids
+            )
+            certified_fallback_pool = tuple(
+                candidate
+                for candidate in self._fallback_pbr_name_index.get(fallback_key, ())
+                if candidate.record_id in fallback_ids
+            )
+            fallback_candidates = self._filter_fallback_candidates(
+                certified_fallback_pool,
+                mhc_class=mhc_class,
+                species=species,
+                fallback_policy=contract_policy,
+                allow_expression_qualified=allow_expression_qualified,
+            )
+            if definition_id is not None:
+                fallback_candidates = tuple(
+                    candidate
+                    for candidate in fallback_candidates
+                    if getattr(candidate, "definition_id") == definition_id
+                )
+            if candidates:
+                notes.append(
+                    "Pseudo-match contract: returned a certified strict PBR; every non-X pseudo residue matches its projected PBR coordinate exactly, while X remains an explicit wildcard."
+                )
+            elif fallback_candidates:
+                synthetic = any(
+                    getattr(candidate, "evidence_level", "")
+                    in {IMPUTED_EVIDENCE, PSEUDO_SCAFFOLD_EVIDENCE}
+                    for candidate in fallback_candidates
+                )
+                notes.append(
+                    "Pseudo-match contract: returned the certified fallback PBR selected for this component; this is compatibility provenance, not proof of a strict deposited biological PBR."
+                )
+                if synthetic:
+                    notes.append(
+                        "The certified PBR is a synthetic engineered construct constrained by the pseudo; unknown X residues were treated as wildcards and were not inserted into the protein chain."
+                    )
+            else:
+                expression_blocked = False
+                if certified_fallback_pool and not allow_expression_qualified:
+                    expression_blocked = bool(
+                        self._filter_fallback_candidates(
+                            certified_fallback_pool,
+                            mhc_class=mhc_class,
+                            species=species,
+                            fallback_policy=contract_policy,
+                            allow_expression_qualified=True,
+                        )
+                    )
+                if expression_blocked:
+                    notes.append(
+                        "A pseudo-match-certified PBR fallback exists, but the allele has an expression suffix; set allow_expression_qualified=True to model it explicitly."
+                    )
+                elif certificates:
+                    notes.append(
+                        "A pseudo/PBR projection certificate exists, but no certified record satisfies the requested filters."
+                    )
+                else:
+                    notes.append(
+                        "No pseudo/PBR projection certificate exists for this exact component name."
+                    )
+        elif not candidates and fallback_policy != "none":
             fallback_candidates = self._filter_fallback_candidates(
                 self._fallback_pbr_name_index.get(fallback_key, ()),
                 mhc_class=mhc_class,
@@ -1040,17 +1385,41 @@ class MHCRegistry:
         representations = {
             getattr(candidate, "definition_id") for candidate in returned_candidates
         }
-        return QueryResult(
-            query=allele,
-            representation=(
+        if require_pseudo_match:
+            synthetic_contract = bool(
+                fallback_candidates
+                and evidence_levels & {IMPUTED_EVIDENCE, PSEUDO_SCAFFOLD_EVIDENCE}
+            )
+            representation = (
+                "pseudo_compatible_pbr"
+                if not returned_candidates
+                else (
+                    "pseudo_compatible_synthetic_pbr"
+                    if synthetic_contract
+                    else (
+                        "pseudo_compatible_fallback_pbr"
+                        if fallback_candidates
+                        else "pseudo_compatible_strict_pbr"
+                    )
+                )
+            )
+        else:
+            representation = (
                 next(iter(representations))
                 if len(representations) == 1
                 else "mixed_peptide_binding_region"
-            ),
+            )
+        return QueryResult(
+            query=allele,
+            representation=representation,
             status=result_status(len(returned_candidates), projected=projected),
             candidates=returned_candidates,
             notes=tuple(notes),
-            fallback_used=fallback_policy if fallback_candidates else "none",
+            fallback_used=(
+                contract_policy
+                if require_pseudo_match and fallback_candidates
+                else (fallback_policy if fallback_candidates else "none")
+            ),
             evidence=(
                 next(iter(evidence_levels))
                 if len(evidence_levels) == 1
@@ -1579,6 +1948,7 @@ class MHCRegistry:
         allow_two_field_projection: bool = False,
         fallback: str = "none",
         allow_expression_qualified: bool = False,
+        require_pseudo_match: bool = False,
     ) -> QueryResult:
         """Resolve an MHC molecule into peptide-binding structural regions.
 
@@ -1599,6 +1969,7 @@ class MHCRegistry:
                 allow_two_field_projection=allow_two_field_projection,
                 fallback=fallback_policy,
                 allow_expression_qualified=allow_expression_qualified,
+                require_pseudo_match=require_pseudo_match,
             )
             projected = heavy.status.startswith("projected_")
             notes.extend(f"heavy chain: {note}" for note in heavy.notes)
@@ -1627,6 +1998,7 @@ class MHCRegistry:
                     allow_two_field_projection=allow_two_field_projection,
                     fallback=fallback_policy,
                     allow_expression_qualified=allow_expression_qualified,
+                    require_pseudo_match=require_pseudo_match,
                 )
                 beta = self.allele_to_pbr(
                     beta_name,
@@ -1635,6 +2007,7 @@ class MHCRegistry:
                     allow_two_field_projection=allow_two_field_projection,
                     fallback=fallback_policy,
                     allow_expression_qualified=allow_expression_qualified,
+                    require_pseudo_match=require_pseudo_match,
                 )
                 projected = projected or alpha.status.startswith("projected_")
                 projected = projected or beta.status.startswith("projected_")
@@ -1681,17 +2054,39 @@ class MHCRegistry:
             for molecule in candidates
             for chain in molecule.chains
         )
-        return QueryResult(
-            query=name,
-            representation=(
+        synthetic_returned = any(
+            getattr(chain, "evidence_level", "")
+            in {IMPUTED_EVIDENCE, PSEUDO_SCAFFOLD_EVIDENCE}
+            for molecule in candidates
+            for chain in molecule.chains
+        )
+        if require_pseudo_match and expected_class == "II" and candidates:
+            notes.append(
+                "Pseudo-match contract was independently certified for both the MHC-II alpha1 and beta1 PBR chains."
+            )
+        if require_pseudo_match:
+            representation = (
+                "pseudo_compatible_synthetic_pbr_molecule"
+                if synthetic_returned
+                else "pseudo_compatible_pbr_molecule"
+            )
+        else:
+            representation = (
                 "peptide_binding_region_fallback_molecule"
                 if fallback_returned
                 else "peptide_binding_region_molecule"
-            ),
+            )
+        return QueryResult(
+            query=name,
+            representation=representation,
             status=result_status(len(candidates), projected=projected),
             candidates=candidates,
             notes=tuple(dict.fromkeys(notes)),
-            fallback_used=fallback_policy if fallback_returned else "none",
+            fallback_used=(
+                "pseudo-scaffold"
+                if require_pseudo_match and fallback_returned
+                else (fallback_policy if fallback_returned else "none")
+            ),
             evidence=(
                 next(iter(evidence_levels))
                 if len(evidence_levels) == 1
@@ -1705,6 +2100,7 @@ class MHCRegistry:
             "complete_sequence_records": sum(item.is_complete for item in self._sequences),
             "af3_sequence_records": len(self._af3_sequences),
             "pbr_sequence_records": len(self._pbr_sequences),
+            "pseudo_pbr_projection_records": len(self._pseudo_pbr_projections),
             "pseudo_records": len(self._pseudos),
             "pseudo_official_supported_records": sum(
                 item.official_support for item in self._pseudos

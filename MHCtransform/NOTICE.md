@@ -24,16 +24,21 @@ records.
   NetMHCIIpan 4.3k `alleles_name.txt`, committed under `tools/reference/`
   with the source URLs and SHA-256 values recorded in `metadata.json`.
 - 34-aa definitions: the original NetMHCpan / NetMHCIIpan publications cited
-  in `AUDIT_REPORT.md`. Bundled entries are separately labeled as exact PBR
-  derivations, contact-complete deposited full/partial derivations, or legacy
-  secondary records. No row has `official_reference` evidence. The legacy
-  PUFFIN mirror remains pinned at commit
+  in `AUDIT_REPORT.md`. Direct primary pseudosequence inputs are committed as
+  `tools/reference/NetMHCpan-4.2e-training-pseudoseqs.dat` (SHA-256
+  `bb8fe764cd187e55d7f83a465eef152419151ad9924825c411ba4e8ed84ef5a7`)
+  and `tools/reference/NetMHCIIpan-4.3k-training-pseudosequence.2023.dat`
+  (SHA-256
+  `daf3b7d693e76d8e8102c374d130467ff1ef7f9311064a730d56a753a3d514b5`).
+  The `4.2e` label identifies the supplied NetMHCpan pseudosequence artifact;
+  the separate public support-name snapshot is NetMHCpan 4.2f. Derived and
+  legacy entries retain their own evidence labels. The legacy PUFFIN mirror
+  remains pinned at commit
   `eddf17d972285a89e80e2837adc1ee6308f5b96b`.
-- Optional DTU training-data archives are local validation oracles only. No
-  oracle-only row is copied into the registry; the raw archives and extracted
-  reference files are not bundled. NetMHCpan and
-  NetMHCIIpan executables, model files, and separately licensed software
-  packages are not part of this repository. See the official service pages:
+- The two DTU pseudosequence text snapshots above are bundled data inputs, but
+  NetMHCpan and NetMHCIIpan executables, model files, complete training
+  archives, and separately licensed software packages are not part of this
+  repository. See the official service pages:
   <https://services.healthtech.dtu.dk/services/NetMHCpan-4.2/> and
   <https://services.healthtech.dtu.dk/services/NetMHCIIpan-4.3/>.
 - `fallback_*_sequences.csv` contains project-derived partial annotations and
@@ -41,6 +46,11 @@ records.
   complete template, pseudo record, and observed/imputed spans. These rows are
   not official IPD/UniProt allele protein sequences and remain subject to the
   upstream data terms above.
+- `pseudo_pbr_projection.csv` is a project-generated audit table. It requires
+  every pseudo contact index to map to a strict or explicitly labeled fallback
+  PBR, requires every non-`X` residue to match exactly, and treats DTU `X`
+  tokens only as documented alignment/unknown wildcards. It does not turn a
+  synthetic fallback into an official allele protein sequence.
 
 Source inputs are identified by SHA-256 digests in `metadata.json` and the
 validation report; generated outputs are stably sorted and deterministic, but

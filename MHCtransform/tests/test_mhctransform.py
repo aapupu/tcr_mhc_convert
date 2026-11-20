@@ -1,6 +1,15 @@
+import csv
+import io
+import json
+import shutil
+import tempfile
 import unittest
+from contextlib import redirect_stdout
+from importlib import resources
+from pathlib import Path
 
 from mhctransform import MHCRegistry, MHCTransformError
+from mhctransform.cli import main as cli_main
 from mhctransform.fallback import expand_positions
 from mhctransform.pbr import (
     PBR_I_DEFINITION,
@@ -82,15 +91,22 @@ class RegistryTests(unittest.TestCase):
         validated_candidate = validated.candidates[0]
         self.assertEqual(
             validated_candidate.evidence_level,
-            "derived_contact_complete_partial",
+            "dtu_official_pseudosequence",
         )
         self.assertTrue(validated_candidate.official_support)
         self.assertEqual(
-            validated_candidate.validation_status, "official_training_exact"
+            validated_candidate.validation_status, "dtu_official_source"
         )
-        self.assertIn("IPD-IMGT/HLA", validated_candidate.source_version)
+        self.assertEqual(
+            validated_candidate.source_version,
+            "NetMHCpan-4.2e training pseudoseqs",
+        )
         self.assertTrue(validated_candidate.source_record_ids)
-        self.assertEqual(validated.evidence, "derived_contact_complete_partial")
+        self.assertIn(
+            "independently_reconstructed_exact",
+            validated_candidate.quality_flags,
+        )
+        self.assertEqual(validated.evidence, "dtu_official_pseudosequence")
 
         derived = self.registry.allele_to_pseudo(
             "HLA-A*01:19",
@@ -128,7 +144,9 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(forward.status, "exact_unique")
         candidate = forward.candidates[0]
         self.assertTrue(candidate.official_support)
-        self.assertEqual(candidate.evidence_level, "derived_exact_pbr")
+        self.assertEqual(
+            candidate.evidence_level, "dtu_official_component_composition"
+        )
         self.assertEqual(
             candidate.validation_status,
             "official_supported_component_composition",
@@ -139,6 +157,8 @@ class RegistryTests(unittest.TestCase):
             "computational_pairing_not_haplotype_evidence",
             candidate.quality_flags,
         )
+        self.assertIn("dtu_primary_source", candidate.quality_flags)
+        self.assertIn("independently_reconstructed_exact", candidate.quality_flags)
 
         reverse = self.registry.pseudo_to_alleles(
             candidate.pseudo_sequence,
@@ -964,6 +984,165 @@ class RegistryTests(unittest.TestCase):
                         "source-partial-v1",
                         pseudo.canonical_name,
                     )
+
+    def test_every_pseudo_component_has_a_complete_pbr_projection(self):
+        projection_path = resources.files("mhctransform").joinpath(
+            "data/pseudo_pbr_projection.csv"
+        )
+        with projection_path.open("r", encoding="utf-8", newline="") as handle:
+            rows = list(csv.DictReader(handle))
+
+        counts = self.registry.metadata["counts"]
+        self.assertEqual(
+            len(rows), counts["pseudo_pbr_projection_components"]
+        )
+        self.assertEqual(counts["pseudo_pbr_projection_uncovered"], 0)
+        self.assertEqual(counts["pseudo_pbr_projection_recovery_components"], 17)
+        self.assertEqual(counts["pseudo_pbr_projection_alignment_gap_components"], 12)
+        self.assertEqual(counts["pseudo_pbr_projection_shifted_positions"], 17)
+        self.assertEqual(counts["pseudo_pbr_projection_max_abs_shift"], 1)
+        self.assertEqual(
+            sum(int(row["pseudo_record_count"]) for row in rows),
+            sum(1 if pseudo.mhc_class == "I" else 2 for pseudo in self.registry._pseudos),
+        )
+        for row in rows:
+            with self.subTest(allele=row["allele"]):
+                expected = row["pseudo_segment"]
+                projected = row["projected_segment"]
+                positions = tuple(
+                    int(value)
+                    for value in row["contact_positions_1based"].split(";")
+                    if value
+                )
+                wildcards = tuple(
+                    int(value)
+                    for value in row["wildcard_pseudo_positions"].split(";")
+                    if value
+                )
+                self.assertEqual(len(positions), len(expected))
+                self.assertEqual(len(projected), len(expected))
+                self.assertNotIn("X", projected)
+                self.assertEqual(len(wildcards), expected.count("X"))
+                self.assertTrue(
+                    all(
+                        wanted == "X" or wanted == observed
+                        for wanted, observed in zip(expected, projected)
+                    )
+                )
+
+        by_allele = {row["allele"]: row for row in rows}
+        # This rare one-residue MHC-I indel requires an explicit coordinate
+        # projection rather than raw fixed offsets.
+        self.assertEqual(by_allele["HLA-C*03:46"]["pbr_source"], "strict")
+        self.assertEqual(by_allele["HLA-B*44:152"]["pbr_source"], "strict")
+        self.assertEqual(
+            by_allele["HLA-DQA1*04:01"]["coordinate_method"],
+            "global_alignment_gap_interpolation_and_bounded_recovery",
+        )
+        for allele in ("H2-Aa*b", "H2-Aa*d", "H2-Aa*k", "H2-Aa*s"):
+            self.assertEqual(by_allele[allele]["pbr_source"], "strict")
+            self.assertEqual(
+                by_allele[allele]["coordinate_method"],
+                "global_alignment_bounded_recovery",
+            )
+        # The DTU value conflicts with the current deposited DRB1*13:10 PBR;
+        # the biological strict chain remains untouched and a separately
+        # labelled pseudo-compatible scaffold satisfies the contract.
+        self.assertEqual(by_allele["HLA-DRB1*13:10"]["pbr_source"], "fallback")
+
+    def test_require_pseudo_match_selects_certified_strict_or_synthetic_pbr(self):
+        strict_default = self.registry.allele_to_pbr(
+            "HLA-DRB1*13:10", mhc_class="II"
+        )
+        self.assertEqual(strict_default.status, "exact_unique")
+        self.assertEqual(strict_default.fallback_used, "none")
+
+        certified = self.registry.allele_to_pbr(
+            "HLA-DRB1*13:10",
+            mhc_class="II",
+            require_pseudo_match=True,
+        )
+        self.assertEqual(certified.status, "exact_unique")
+        self.assertEqual(certified.representation, "pseudo_compatible_synthetic_pbr")
+        self.assertEqual(certified.fallback_used, "pseudo-scaffold")
+        self.assertEqual(certified.evidence, "pseudo_only_scaffold")
+        self.assertNotEqual(
+            strict_default.candidates[0].record_id,
+            certified.candidates[0].record_id,
+        )
+        self.assertTrue(any("synthetic" in note for note in certified.notes))
+
+        compatible_strict = self.registry.allele_to_pbr(
+            "HLA-A*02:01", mhc_class="I", require_pseudo_match=True
+        )
+        self.assertEqual(compatible_strict.status, "exact_unique")
+        self.assertEqual(
+            compatible_strict.representation, "pseudo_compatible_strict_pbr"
+        )
+        self.assertEqual(compatible_strict.fallback_used, "none")
+
+    def test_stale_pseudo_pbr_projection_is_rejected_at_load_time(self):
+        source = Path(str(resources.files("mhctransform").joinpath("data")))
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory)
+            for path in source.iterdir():
+                (data_dir / path.name).symlink_to(path)
+
+            projection_path = data_dir / "pseudo_pbr_projection.csv"
+            projection_path.unlink()
+            shutil.copyfile(source / projection_path.name, projection_path)
+            with projection_path.open("r", encoding="utf-8", newline="") as handle:
+                rows = list(csv.DictReader(handle))
+                fields = tuple(rows[0])
+            rows[0]["projected_segment"] = (
+                "A" if rows[0]["projected_segment"][0] != "A" else "C"
+            ) + rows[0]["projected_segment"][1:]
+            with projection_path.open("w", encoding="utf-8", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=fields, lineterminator="\n")
+                writer.writeheader()
+                writer.writerows(rows)
+
+            with self.assertRaisesRegex(
+                MHCTransformError, "invalid or stale pseudo/PBR projection"
+            ):
+                MHCRegistry(data_dir)
+
+    def test_require_pseudo_match_certifies_both_mhcii_pbr_chains(self):
+        result = self.registry.molecule_to_pbr_chains(
+            "HLA-DRB1*13:10",
+            mhc_class="II",
+            require_pseudo_match=True,
+        )
+        self.assertEqual(result.status, "exact_unique")
+        self.assertEqual(
+            result.representation, "pseudo_compatible_synthetic_pbr_molecule"
+        )
+        self.assertEqual(result.fallback_used, "pseudo-scaffold")
+        self.assertEqual(
+            tuple(chain.chain_role for chain in result.candidates[0].chains),
+            ("alpha", "beta"),
+        )
+        self.assertTrue(
+            any("both the MHC-II alpha1 and beta1" in note for note in result.notes)
+        )
+
+    def test_cli_require_pseudo_match_reports_synthetic_provenance(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            status = cli_main(
+                [
+                    "allele-to-pbr",
+                    "HLA-DRB1*13:10",
+                    "--class",
+                    "II",
+                    "--require-pseudo-match",
+                ]
+            )
+        self.assertEqual(status, 0)
+        result = json.loads(output.getvalue())
+        self.assertEqual(result["representation"], "pseudo_compatible_synthetic_pbr")
+        self.assertEqual(result["fallback_used"], "pseudo-scaffold")
+        self.assertEqual(result["evidence"], "pseudo_only_scaffold")
 
     def test_every_imputed_full_uses_a_complete_precursor_template(self):
         parents = {

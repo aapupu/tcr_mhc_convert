@@ -1,56 +1,59 @@
 {
   "counts": {
     "by_evidence": {
-      "derived_contact_complete_full": 89,
-      "derived_contact_complete_partial": 7223,
-      "derived_exact_pbr": 13560,
-      "legacy_secondary": 3572
+      "derived_contact_complete_partial": 3844,
+      "derived_exact_pbr": 10808,
+      "dtu_official_component_composition": 3339,
+      "dtu_official_pseudosequence": 5848,
+      "legacy_secondary": 626
     },
     "deposited_derivation_conflicts": 0,
     "official_guided_mhci_indel_recoveries": 4,
-    "pseudo_components": 4386,
-    "pseudo_i": 15488,
-    "pseudo_ii": 8956,
-    "pseudo_total": 24444,
-    "quarantined": 280,
-    "secondary_component_conflicts": 17
+    "pseudo_components": 4390,
+    "pseudo_i": 15489,
+    "pseudo_ii": 8976,
+    "pseudo_total": 24465,
+    "quarantined": 344,
+    "secondary_component_conflicts": 21
   },
-  "official_training_validation": {
-    "mhc_i_derived_conflicts": [],
-    "mhc_i_final_exact_matches": 215,
-    "mhc_i_scope": 216,
-    "mhc_ii_component_derived_conflicts": [
+  "derived_artifacts_invalidated": [],
+  "dtu_pseudosequence_source": {
+    "mhc_i_independent_reconstruction_conflicts": [],
+    "mhc_i_rows_imported": 216,
+    "mhc_i_rows_in_human_mouse_scope": 216,
+    "mhc_ii_component_composition_conflicts": [],
+    "mhc_ii_component_independent_reconstruction_conflicts": [
       {
         "allele": "HLA-DPB1*119:01",
-        "derived": "YLQFEYFDLEKVRVHLNVT",
-        "official": "HLQFEYFDLEKVRVHLNVT"
+        "dtu": "HLQFEYFDLEKVRVHLNVT",
+        "independent": "YLQFEYFDLEKVRVHLNVT"
       },
       {
         "allele": "HLA-DPB1*70:01",
-        "derived": "YLQFEYFDLEKVRVHLDVT",
-        "official": "DLQFEYFDLEKVRVHLDVT"
+        "dtu": "DLQFEYFDLEKVRVHLDVT",
+        "independent": "YLQFEYFDLEKVRVHLDVT"
       },
       {
         "allele": "HLA-DPB1*86:01",
-        "derived": "YLQFEYFDIEEVRMHLGMT",
-        "official": "HLQFEYFDIEEVRMHLGMT"
+        "dtu": "HLQFEYFDIEEVRMHLGMT",
+        "independent": "YLQFEYFDIEEVRMHLGMT"
       },
       {
         "allele": "HLA-DPB1*98:01",
-        "derived": "YLQFEYFDIEKVRMHLDVT",
-        "official": "HLQFEYFDIEKVRMHLDVT"
+        "dtu": "HLQFEYFDIEKVRMHLDVT",
+        "independent": "YLQFEYFDIEKVRMHLDVT"
       },
       {
         "allele": "HLA-DRB1*13:10",
-        "derived": "ESSFDYFDIDKATYHVVFT",
-        "official": "ESSFDSYSIDKATYHVGFT"
+        "dtu": "ESSFDSYSIDKATYHVGFT",
+        "independent": "ESSFDYFDIDKATYHVVFT"
       }
     ],
-    "mhc_ii_composition_conflicts": [],
-    "mhc_ii_final_exact_matches": 5565,
-    "mhc_ii_scope": 5631,
-    "training_pseudo_files_are_not_bundled": true,
-    "training_pseudo_rows_are_not_copied": true
+    "mhc_ii_rows_imported": 5632,
+    "mhc_ii_rows_in_human_mouse_scope": 5632,
+    "training_pseudo_files_are_bundled_in_runtime_wheel": false,
+    "training_pseudo_files_are_bundled_in_source_repository": true,
+    "training_pseudo_rows_are_primary_source": true
   },
   "official_versions": {
     "netmhciipan": "NetMHCIIpan-4.3k",
@@ -58,14 +61,13 @@
   },
   "source_hashes": {
     "netmhciipan_support_list": "143930820fcc5d395c78280bb82a07a6c0ee943db2fc3f7ab0f7a78b1cacfcb3",
-    "netmhciipan_training_pseudo_validation": "daf3b7d693e76d8e8102c374d130467ff1ef7f9311064a730d56a753a3d514b5",
+    "netmhciipan_training_pseudosequence": "daf3b7d693e76d8e8102c374d130467ff1ef7f9311064a730d56a753a3d514b5",
     "netmhcpan_support_list": "09167ed2e1f372ae732b978e36e7000a15c85cef2d9eae6c484012f3467b8e18",
-    "netmhcpan_training_pseudo_validation": "bb8fe764cd187e55d7f83a465eef152419151ad9924825c411ba4e8ed84ef5a7"
+    "netmhcpan_training_pseudosequence": "bb8fe764cd187e55d7f83a465eef152419151ad9924825c411ba4e8ed84ef5a7"
   },
   "support_coverage": {
-    "mhc_i_available": 8743,
+    "mhc_i_available": 8744,
     "mhc_i_missing": [
-      "H-2-Kq",
       "HLA-A*01:100",
       "HLA-A*01:101",
       "HLA-A*01:102",
@@ -1719,28 +1721,8 @@
       "HLA-C*16:67"
     ],
     "mhc_i_supported_names": 10395,
-    "mhc_ii_available": 8956,
+    "mhc_ii_available": 8976,
     "mhc_ii_missing": [
-      "HLA-DPA1*01:11/HLA-DPB1*119:01",
-      "HLA-DPA1*01:11/HLA-DPB1*70:01",
-      "HLA-DPA1*01:11/HLA-DPB1*86:01",
-      "HLA-DPA1*01:11/HLA-DPB1*98:01",
-      "HLA-DPA1*01:12/HLA-DPB1*119:01",
-      "HLA-DPA1*01:12/HLA-DPB1*70:01",
-      "HLA-DPA1*01:12/HLA-DPB1*86:01",
-      "HLA-DPA1*01:12/HLA-DPB1*98:01",
-      "HLA-DPA1*02:06/HLA-DPB1*119:01",
-      "HLA-DPA1*02:06/HLA-DPB1*70:01",
-      "HLA-DPA1*02:06/HLA-DPB1*86:01",
-      "HLA-DPA1*02:06/HLA-DPB1*98:01",
-      "HLA-DPA1*02:07/HLA-DPB1*119:01",
-      "HLA-DPA1*02:07/HLA-DPB1*70:01",
-      "HLA-DPA1*02:07/HLA-DPB1*86:01",
-      "HLA-DPA1*02:07/HLA-DPB1*98:01",
-      "HLA-DPA1*02:10/HLA-DPB1*119:01",
-      "HLA-DPA1*02:10/HLA-DPB1*70:01",
-      "HLA-DPA1*02:10/HLA-DPB1*86:01",
-      "HLA-DPA1*02:10/HLA-DPB1*98:01",
       "HLA-DQA1*01:01/HLA-DQB1*03:104",
       "HLA-DQA1*01:01/HLA-DQB1*03:108",
       "HLA-DQA1*01:01/HLA-DQB1*03:109",

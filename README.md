@@ -48,6 +48,10 @@ mhctransform molecule-to-pbr 'HLA-A*02:01' --class I
 mhctransform molecule-to-pbr \
   'HLA-DRA*01:01/HLA-DRB1*15:01' --class II
 
+# Require a PBR whose projected contact residues reproduce the DTU pseudo
+mhctransform molecule-to-pbr 'HLA-A*02:01' \
+  --class I --require-pseudo-match
+
 # Rare allele: retain deposited residues and fill only missing AF3 positions
 mhctransform molecule-to-af3 'HLA-B*08:03' \
   --class I --fallback imputed
@@ -112,4 +116,4 @@ tcr_mhc_convert/
 
 ## License and data terms
 
-Repository code is licensed under the [MIT License](LICENSE). Each package's `NOTICE.md` and data metadata record pinned versions, checksums, and provenance for upstream resources including IPD-IMGT/HLA, UniProt, tcrdist3, the public NetMHCpan 4.2f/NetMHCIIpan 4.3k support lists, and the legacy PUFFIN mirror. The MIT License applies to repository code; it does not relicense bundled or derived biological reference data. DTU executables, model files, raw training archives, and oracle-only pseudo rows are not redistributed. Review the applicable upstream terms before redistributing data.
+Repository code is licensed under the [MIT License](LICENSE). Each package's `NOTICE.md` and data metadata record pinned versions, checksums, and provenance for upstream resources including IPD-IMGT/HLA, UniProt, tcrdist3, the public NetMHCpan 4.2f/NetMHCIIpan 4.3k support lists, the bundled NetMHCpan 4.2e and NetMHCIIpan 4.3k pseudosequence snapshots, and the legacy PUFFIN mirror. The DTU pseudosequence text files are direct primary inputs to the MHC registry; DTU executables, model files, and complete training archives are not included. The MIT License applies to repository code and does not relicense bundled or derived biological reference data. Review the applicable upstream terms before redistributing data.

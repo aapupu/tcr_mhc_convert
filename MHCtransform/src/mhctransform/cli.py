@@ -128,6 +128,14 @@ def build_parser() -> argparse.ArgumentParser:
     allele_pbr.add_argument("--allow-two-field-projection", action="store_true")
     allele_pbr.add_argument("--fallback", choices=FALLBACK_POLICIES, default="none")
     allele_pbr.add_argument("--allow-expression-qualified", action="store_true")
+    allele_pbr.add_argument(
+        "--require-pseudo-match",
+        action="store_true",
+        help=(
+            "return only the strict or synthetic PBR certified by the "
+            "pseudo-to-PBR projection contract"
+        ),
+    )
 
     pbr_allele = subparsers.add_parser(
         "pbr-to-allele",
@@ -153,6 +161,14 @@ def build_parser() -> argparse.ArgumentParser:
     molecule_pbr.add_argument("--allow-two-field-projection", action="store_true")
     molecule_pbr.add_argument("--fallback", choices=FALLBACK_POLICIES, default="none")
     molecule_pbr.add_argument("--allow-expression-qualified", action="store_true")
+    molecule_pbr.add_argument(
+        "--require-pseudo-match",
+        action="store_true",
+        help=(
+            "require a projection-contract-certified PBR for every chain; "
+            "MHC-II alpha1 and beta1 must both pass"
+        ),
+    )
 
     coverage = subparsers.add_parser(
         "coverage", help="summarize strict, partial, imputed and scaffold availability"
@@ -248,6 +264,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 allow_two_field_projection=args.allow_two_field_projection,
                 fallback=args.fallback,
                 allow_expression_qualified=args.allow_expression_qualified,
+                require_pseudo_match=args.require_pseudo_match,
             ).as_dict()
         elif args.command == "pbr-to-allele":
             result = registry.pbr_to_alleles(
@@ -265,6 +282,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 allow_two_field_projection=args.allow_two_field_projection,
                 fallback=args.fallback,
                 allow_expression_qualified=args.allow_expression_qualified,
+                require_pseudo_match=args.require_pseudo_match,
             ).as_dict()
         elif args.command == "coverage":
             result = registry.coverage(

@@ -2,10 +2,10 @@
 """Build the NetMHC-supported and sequence-derived 34-aa registry.
 
 The public NetMHCpan/NetMHCIIpan allele-name lists define *supported names*.
-For names with a strict PBR, contact residues are independently extracted from
-the pinned IPD/UniProt-derived sequence.  Public DTU training-data pseudo files
-are supplied only as local validation oracles: neither the archives nor rows
-available only from those files are copied into the distributable registry.
+The bundled DTU training-data pseudosequence snapshots are authoritative direct
+sources for the human/mouse rows they contain.  Independently reconstructed
+IPD/UniProt contact sequences remain an audit cross-check and are retained in
+the provenance report when they agree or conflict with the DTU value.
 """
 
 from __future__ import annotations
@@ -37,6 +37,9 @@ PSEUDO_I_DEFINITION = "netmhcpan-34-v1"
 PSEUDO_II_DEFINITION = "netmhciipan-34-v1"
 OFFICIAL_I_VERSION = "NetMHCpan-4.2f"
 OFFICIAL_II_VERSION = "NetMHCIIpan-4.3k"
+DTU_I_PSEUDO_VERSION = "NetMHCpan-4.2e training pseudoseqs"
+DTU_II_PSEUDO_VERSION = "NetMHCIIpan-4.3k pseudosequence.2023"
+DTU_PSEUDO_EVIDENCE = "dtu_official_pseudosequence"
 OFFICIAL_I_LIST_URL = (
     "https://services.healthtech.dtu.dk/services/NetMHCpan-4.2/allele.list"
 )
@@ -226,6 +229,20 @@ def split_values(value: str) -> Tuple[str, ...]:
     return tuple(item for item in str(value).split(";") if item)
 
 
+def pseudo_matches_non_x(expected: str, observed: str) -> bool:
+    """Return whether an observed contact string satisfies a DTU pseudo.
+
+    DTU uses ``X`` for an alignment gap or unspecified contact token.  It is
+    not an amino acid and therefore acts only as a wildcard here; every other
+    position must match exactly.
+    """
+
+    return len(expected) == len(observed) and all(
+        wanted == "X" or wanted == found
+        for wanted, found in zip(expected, observed)
+    )
+
+
 def contact_alignment_map(reference: str, target: str) -> Mapping[int, int]:
     """Conservatively map aligned PBR coordinates without inventing gaps.
 
@@ -267,14 +284,50 @@ def write_csv(
             writer.writerow({field: row.get(field, "") for field in fields})
 
 
-def canonical_hla_component(gene: str, digits: str) -> str:
-    if ":" in digits:
-        first, second = digits.split(":", 1)
-    else:
-        if len(digits) < 4:
-            raise ValueError(f"invalid compact HLA field: {gene}{digits}")
-        first, second = digits[:-2], digits[-2:]
-    return f"HLA-{gene}*{first}:{second}"
+def canonical_hla_component(
+    gene: str,
+    digits: str,
+    known_components: Iterable[str] = (),
+) -> str:
+    """Resolve a compact DTU HLA name without assuming two-digit fields.
+
+    Values such as ``DRB1_13100`` are ambiguous if split mechanically: the
+    supported allele is ``DRB1*13:100``, not ``DRB1*131:00``.  Enumerating the
+    splits against the matching DTU support list makes that distinction
+    deterministic.  Expression suffixes (for example ``DRB5_0108N``) are
+    preserved while the unsuffixed support name is used for disambiguation.
+    """
+
+    match = re.fullmatch(r"([0-9:]+)([NLSQCA]?)", digits)
+    if not match:
+        raise ValueError(f"invalid compact HLA field: {gene}{digits}")
+    numeric, suffix = match.groups()
+    known = set(known_components)
+    if ":" in numeric:
+        first, second = numeric.split(":", 1)
+        return current_component_name(f"HLA-{gene}*{first}:{second}{suffix}")
+    if len(numeric) < 4:
+        raise ValueError(f"invalid compact HLA field: {gene}{digits}")
+
+    candidates: List[str] = []
+    for split in range(2, len(numeric) - 1):
+        first, second = numeric[:split], numeric[split:]
+        base = current_component_name(f"HLA-{gene}*{first}:{second}")
+        candidate = f"{base}{suffix}" if suffix else base
+        if not known or base in known or candidate in known:
+            candidates.append(candidate)
+    candidates = sorted(set(candidates))
+    if known:
+        if len(candidates) != 1:
+            raise ValueError(
+                f"cannot uniquely resolve compact HLA field {gene}{digits}: "
+                f"{candidates or 'no supported candidate'}"
+            )
+        return candidates[0]
+    # Backward-compatible fallback for callers without a support universe.
+    return current_component_name(
+        f"HLA-{gene}*{numeric[:-2]}:{numeric[-2:]}{suffix}"
+    )
 
 
 def parse_official_i_name(raw: str) -> str | None:
@@ -286,23 +339,27 @@ def parse_official_i_name(raw: str) -> str | None:
     return None
 
 
-def parse_official_ii_name(raw: str) -> Tuple[str, str, str] | None:
-    dr = re.fullmatch(r"(DRB[1-5])_([0-9]+)", raw)
+def parse_official_ii_name(
+    raw: str,
+    known_components: Iterable[str] = (),
+) -> Tuple[str, str, str] | None:
+    dr = re.fullmatch(r"(DRB[1-5])_([0-9]+[NLSQCA]?)", raw)
     if dr:
-        beta = current_component_name(
-            canonical_hla_component(dr.group(1), dr.group(2))
+        beta = canonical_hla_component(
+            dr.group(1), dr.group(2), known_components
         )
         alpha = "HLA-DRA*01:01"
         return f"{alpha}/{beta}", alpha, beta
     pair = re.fullmatch(
-        r"HLA-(D[QP]A1)([0-9]+)-(D[QP]B1)([0-9]+)", raw
+        r"HLA-(D[QP]A1)([0-9]+[NLSQCA]?)-(D[QP]B1)([0-9]+[NLSQCA]?)",
+        raw,
     )
     if pair:
-        alpha = current_component_name(
-            canonical_hla_component(pair.group(1), pair.group(2))
+        alpha = canonical_hla_component(
+            pair.group(1), pair.group(2), known_components
         )
-        beta = current_component_name(
-            canonical_hla_component(pair.group(3), pair.group(4))
+        beta = canonical_hla_component(
+            pair.group(3), pair.group(4), known_components
         )
         return f"{alpha}/{beta}", alpha, beta
     if raw in MOUSE_PAIRS:
@@ -328,13 +385,14 @@ def parse_training_pseudo_i(path: Path) -> Mapping[str, Tuple[str, str]]:
 
 def parse_training_pseudo_ii(
     path: Path,
+    known_components: Iterable[str] = (),
 ) -> Mapping[str, Tuple[str, str, str, str]]:
     result: Dict[str, Tuple[str, str, str, str]] = {}
     for line in path.read_text(encoding="utf-8").splitlines():
         fields = line.split()
         if len(fields) < 2:
             continue
-        parsed = parse_official_ii_name(fields[0])
+        parsed = parse_official_ii_name(fields[0], known_components)
         sequence = fields[1].upper()
         if parsed and len(sequence) == 34:
             name, alpha, beta = parsed
@@ -732,13 +790,27 @@ def normalized_base_row(row: Mapping[str, str]) -> Dict[str, object]:
 
 def build(args: argparse.Namespace) -> Mapping[str, object]:
     data_dir = args.data_dir.resolve()
+    pseudo_path = data_dir / "pseudo_sequences.csv"
+    previous_pseudo_hash = (
+        sha256_path(pseudo_path) if pseudo_path.is_file() else ""
+    )
     secondary_rows = read_csv(data_dir / "secondary_pseudo_sequences.csv")
     pbr_rows = read_csv(data_dir / "pbr_sequences.csv")
     full_rows = read_csv(data_dir / "full_sequences.csv")
     supported_i, supported_i_aliases = parse_supported_i(args.supported_i)
     supported_ii = parse_supported_ii(args.supported_ii)
+    supported_ii_components = set().union(*supported_ii.values())
+    supported_ii_components.add("HLA-DRA*01:01")
+    supported_ii_components.update(
+        component
+        for molecule in supported_ii["mouse"]
+        if molecule in MOUSE_PAIRS
+        for component in MOUSE_PAIRS[molecule]
+    )
     official_i = parse_training_pseudo_i(args.official_pseudo_i)
-    official_ii = parse_training_pseudo_ii(args.official_pseudo_ii)
+    official_ii = parse_training_pseudo_ii(
+        args.official_pseudo_ii, supported_ii_components
+    )
     official_i_hash = sha256_path(args.official_pseudo_i)
     official_ii_hash = sha256_path(args.official_pseudo_ii)
     if official_i_hash != OFFICIAL_I_TRAINING_PSEUDO_SHA256:
@@ -760,8 +832,6 @@ def build(args: argparse.Namespace) -> Mapping[str, object]:
         for _sequence, alpha, beta, _raw in official_ii.values()
         for value in (alpha, beta)
     }
-    supported_ii_components = set().union(*supported_ii.values())
-    supported_ii_components.add("HLA-DRA*01:01")
     deposited_i, deposited_ii, deposited_conflicts = derive_from_deposited_sequences(
         full_rows,
         pbr_rows,
@@ -806,6 +876,7 @@ def build(args: argparse.Namespace) -> Mapping[str, object]:
         source_ids: Tuple[str, ...] = ()
         selected_quality_flags: Tuple[str, ...] = ()
         aliases = set(supported_i_aliases.get(name, ()))
+        independent_sequence = ""
         if name in derived_i:
             value = derived_i[name]
             chosen_sequence = value.sequence
@@ -834,25 +905,41 @@ def build(args: argparse.Namespace) -> Mapping[str, object]:
             source_version = rows[0]["source_version"]
             evidence = "legacy_secondary"
             validation = "legacy_secondary_only"
-        else:
-            continue
+        independent_sequence = chosen_sequence
         if name in official_i:
             official_sequence, raw_alias = official_i[name]
             aliases.add(raw_alias)
-            if chosen_sequence != official_sequence:
-                validation_conflicts_i.append(name)
-                # The public training artifact is a validation oracle, not a
-                # redistributable source database.  Do not publish a row that
-                # fails that check and do not copy the oracle sequence in.
-                continue
-            validation = "official_training_exact"
+            flags = set(selected_quality_flags)
+            flags.add("dtu_primary_source")
+            if independent_sequence:
+                if independent_sequence == official_sequence:
+                    flags.add("independently_reconstructed_exact")
+                else:
+                    flags.add("conflicts_with_independently_reconstructed_sequence")
+                    validation_conflicts_i.append(
+                        {
+                            "allele": name,
+                            "dtu": official_sequence,
+                            "independent": independent_sequence,
+                        }
+                    )
+            else:
+                flags.add("no_independent_contact_complete_sequence")
+            chosen_sequence = official_sequence
+            source = "DTU Health Tech NetMHCpan training pseudosequence"
+            source_version = DTU_I_PSEUDO_VERSION
+            evidence = DTU_PSEUDO_EVIDENCE
+            validation = "dtu_official_source"
+            selected_quality_flags = tuple(sorted(flags))
+        elif not chosen_sequence:
+            continue
         for old in secondary_i.get(name, ()):
             aliases.update(split_values(old["aliases"]))
             if old["pseudo_sequence"] != chosen_sequence:
                 loser = normalized_base_row(old)
                 loser["reason"] = (
-                    "secondary pseudo conflicts with a higher-priority "
-                    "independently derived PBR/contact-complete reference"
+                    "secondary pseudo conflicts with the higher-priority "
+                    "DTU direct source or independent PBR/contact reference"
                 )
                 conflict_rows.append(loser)
         aliases.update(aliases_for_chain(name))
@@ -920,6 +1007,7 @@ def build(args: argparse.Namespace) -> Mapping[str, object]:
         for component in MOUSE_PAIRS[molecule]
     )
     for allele in sorted(all_component_names):
+        value = None
         if allele in derived_ii:
             derived = derived_ii[allele]
             value = ComponentValue(
@@ -956,52 +1044,45 @@ def build(args: argparse.Namespace) -> Mapping[str, object]:
                 allele in supported_component_names,
                 aliases,
             )
-        else:
-            # An official-training-only component is intentionally not copied
-            # into the distributable registry.  It remains part of the local
-            # validation report and can be revisited when a primary sequence
-            # covers every contact column.
-            continue
 
         if allele in official_components:
             official_sequence = next(iter(official_components[allele]))
-            if value.sequence != official_sequence:
+            independent = value
+            flags = {"dtu_primary_source"}
+            aliases = set(independent.aliases if independent is not None else ())
+            source_ids = independent.source_ids if independent is not None else ()
+            if independent is None:
+                flags.add("no_independent_contact_complete_sequence")
+            elif not pseudo_matches_non_x(
+                official_sequence, independent.sequence
+            ):
+                flags.add("conflicts_with_independently_reconstructed_sequence")
                 component_validation_conflicts.append(
                     {
                         "allele": allele,
-                        "official": official_sequence,
-                        "derived": value.sequence,
+                        "dtu": official_sequence,
+                        "independent": independent.sequence,
                     }
                 )
-                secondary = secondary_components.get(allele)
-                if secondary is None or secondary[0] != official_sequence:
-                    continue
-                # Preserve an already-bundled legacy mirror only when it is an
-                # exact match to the validation oracle; never copy the oracle.
-                sequence, aliases = secondary
-                value = ComponentValue(
-                    sequence,
-                    "legacy_secondary",
-                    "PUFFIN NetMHCIIpan-format secondary mirror",
-                    "pinned-secondary-snapshot",
-                    (),
-                    "official_training_exact",
-                    allele in supported_component_names,
-                    aliases,
-                    ("conflicts_with_current_ipd_derived_sequence",),
-                )
+            elif "X" in official_sequence:
+                flags.add("independently_reconstructed_non_x_exact")
             else:
-                value = ComponentValue(
-                    value.sequence,
-                    value.evidence,
-                    value.source,
-                    value.source_version,
-                    value.source_ids,
-                    "official_training_exact",
-                    allele in supported_component_names,
-                    value.aliases,
-                    value.quality_flags,
-                )
+                flags.add("independently_reconstructed_exact")
+            if "X" in official_sequence:
+                flags.add("contains_official_alignment_gap_token")
+            value = ComponentValue(
+                official_sequence,
+                DTU_PSEUDO_EVIDENCE,
+                "DTU Health Tech NetMHCIIpan training pseudosequence component",
+                DTU_II_PSEUDO_VERSION,
+                source_ids,
+                "dtu_official_source",
+                allele in supported_component_names,
+                tuple(sorted(aliases)),
+                tuple(sorted(flags)),
+            )
+        elif value is None:
+            continue
         if allele in secondary_components:
             secondary_sequence = secondary_components[allele][0]
             if secondary_sequence != value.sequence:
@@ -1085,7 +1166,9 @@ def build(args: argparse.Namespace) -> Mapping[str, object]:
             beta_value = component_values[beta]
             sequence = alpha_value.sequence + beta_value.sequence
             component_evidence = {alpha_value.evidence, beta_value.evidence}
-            if "legacy_secondary" in component_evidence:
+            if DTU_PSEUDO_EVIDENCE in component_evidence:
+                evidence = "dtu_official_component_composition"
+            elif "legacy_secondary" in component_evidence:
                 evidence = "legacy_secondary"
             elif "derived_contact_complete_partial" in component_evidence:
                 evidence = "derived_contact_complete_partial"
@@ -1110,26 +1193,19 @@ def build(args: argparse.Namespace) -> Mapping[str, object]:
 
             if training_reference is not None:
                 official_sequence = training_reference[0]
-                if sequence == official_sequence:
-                    validation = "official_training_exact"
-                else:
-                    official_pair_conflicts.append(name)
-                    matching_secondary = [
-                        row
-                        for row in secondary_ii.get(name, ())
-                        if row["pseudo_sequence"] == official_sequence
-                    ]
-                    if not matching_secondary:
-                        continue
-                    # This exact value was already present in the pinned
-                    # secondary snapshot; the validation oracle is not copied.
-                    old = matching_secondary[0]
-                    sequence = old["pseudo_sequence"]
-                    evidence = "legacy_secondary"
-                    validation = "official_training_exact"
-                    source = old["source"]
-                    source_version = old["source_version"]
-                    source_ids = ()
+                if sequence != official_sequence:
+                    official_pair_conflicts.append(
+                        {
+                            "molecule": name,
+                            "dtu": official_sequence,
+                            "component_composition": sequence,
+                        }
+                    )
+                sequence = official_sequence
+                evidence = DTU_PSEUDO_EVIDENCE
+                validation = "dtu_official_source"
+                source = "DTU Health Tech NetMHCIIpan training pseudosequence"
+                source_version = DTU_II_PSEUDO_VERSION
         elif secondary_ii.get(name):
             sequences = {row["pseudo_sequence"] for row in secondary_ii[name]}
             if len(sequences) != 1:
@@ -1138,7 +1214,7 @@ def build(args: argparse.Namespace) -> Mapping[str, object]:
             old = secondary_ii[name][0]
             evidence = "legacy_secondary"
             validation = (
-                "official_training_exact"
+                "dtu_official_source"
                 if training_reference is not None
                 and sequence == training_reference[0]
                 else "legacy_secondary_only"
@@ -1155,8 +1231,8 @@ def build(args: argparse.Namespace) -> Mapping[str, object]:
             if old["pseudo_sequence"] != sequence:
                 loser = normalized_base_row(old)
                 loser["reason"] = (
-                    "secondary pseudo conflicts with a higher-priority "
-                    "independently reconstructed component reference"
+                    "secondary pseudo conflicts with the higher-priority "
+                    "DTU direct source or independent component reference"
                 )
                 conflict_rows.append(loser)
         aliases.discard(name)
@@ -1166,10 +1242,16 @@ def build(args: argparse.Namespace) -> Mapping[str, object]:
             flags.update(component_values[alpha].quality_flags)
         if beta in component_values:
             flags.update(component_values[beta].quality_flags)
+        if "conflicts_with_independently_reconstructed_sequence" in flags:
+            # A molecule can contain one independently matching component and
+            # one conflicting component.  Avoid the misleading appearance
+            # that the complete 34-mer was independently reconstructed.
+            flags.discard("independently_reconstructed_exact")
+            flags.add("one_or_more_components_conflict_with_independent_sequence")
         if "X" in sequence:
             flags.add(
                 "contains_official_alignment_gap_token"
-                if validation == "official_training_exact"
+                if validation == "dtu_official_source"
                 else "contains_alignment_gap_or_unknown_token"
             )
         if not official_supported:
@@ -1239,15 +1321,37 @@ def build(args: argparse.Namespace) -> Mapping[str, object]:
         key_fields=("mhc_class", "canonical_name", "reason", "pseudo_sequence"),
     )
 
+    # Fallback chains and projection certificates are derived from the pseudo
+    # registry.  Never leave an older generation in place after a standalone
+    # pseudo update: absence is safe and explicit, while mixed-generation data
+    # could make a runtime compatibility query trust a stale certificate.
+    pseudo_changed = previous_pseudo_hash != sha256_path(pseudo_path)
+    dependent_artifacts = (
+        "fallback_full_sequences.csv",
+        "fallback_af3_sequences.csv",
+        "fallback_pbr_sequences.csv",
+        "pseudo_pbr_projection.csv",
+    )
+    invalidated_artifacts = []
+    if pseudo_changed:
+        for filename in dependent_artifacts:
+            path = data_dir / filename
+            if path.is_file():
+                path.unlink()
+                invalidated_artifacts.append(filename)
+    derived_artifacts_pending = any(
+        not (data_dir / filename).is_file() for filename in dependent_artifacts
+    )
+
     by_evidence = Counter(str(row["evidence_level"]) for row in final_rows)
     report = {
         "official_versions": {
             "netmhcpan": OFFICIAL_I_VERSION,
             "netmhciipan": OFFICIAL_II_VERSION,
         },
-        "official_training_validation": {
-            "mhc_i_scope": len(official_i),
-            "mhc_i_final_exact_matches": sum(
+        "dtu_pseudosequence_source": {
+            "mhc_i_rows_in_human_mouse_scope": len(official_i),
+            "mhc_i_rows_imported": sum(
                 1
                 for name, (sequence, _raw) in official_i.items()
                 if any(
@@ -1255,9 +1359,9 @@ def build(args: argparse.Namespace) -> Mapping[str, object]:
                     for row in final_i
                 )
             ),
-            "mhc_i_derived_conflicts": validation_conflicts_i,
-            "mhc_ii_scope": len(official_ii),
-            "mhc_ii_final_exact_matches": sum(
+            "mhc_i_independent_reconstruction_conflicts": validation_conflicts_i,
+            "mhc_ii_rows_in_human_mouse_scope": len(official_ii),
+            "mhc_ii_rows_imported": sum(
                 1
                 for name, (sequence, _alpha, _beta, _raw) in official_ii.items()
                 if any(
@@ -1265,10 +1369,11 @@ def build(args: argparse.Namespace) -> Mapping[str, object]:
                     for row in final_ii
                 )
             ),
-            "mhc_ii_component_derived_conflicts": component_validation_conflicts,
-            "mhc_ii_composition_conflicts": official_pair_conflicts,
-            "training_pseudo_files_are_not_bundled": True,
-            "training_pseudo_rows_are_not_copied": True,
+            "mhc_ii_component_independent_reconstruction_conflicts": component_validation_conflicts,
+            "mhc_ii_component_composition_conflicts": official_pair_conflicts,
+            "training_pseudo_files_are_bundled_in_source_repository": True,
+            "training_pseudo_files_are_bundled_in_runtime_wheel": False,
+            "training_pseudo_rows_are_primary_source": True,
         },
         "support_coverage": {
             "mhc_i_supported_names": len(supported_i),
@@ -1289,11 +1394,12 @@ def build(args: argparse.Namespace) -> Mapping[str, object]:
             "deposited_derivation_conflicts": len(deposited_conflicts),
             "official_guided_mhci_indel_recoveries": len(official_guided_i),
         },
+        "derived_artifacts_invalidated": invalidated_artifacts,
         "source_hashes": {
             "netmhcpan_support_list": sha256_path(args.supported_i),
             "netmhciipan_support_list": sha256_path(args.supported_ii),
-            "netmhcpan_training_pseudo_validation": official_i_hash,
-            "netmhciipan_training_pseudo_validation": official_ii_hash,
+            "netmhcpan_training_pseudosequence": official_i_hash,
+            "netmhciipan_training_pseudosequence": official_ii_hash,
         },
     }
     validation_path = data_dir / "pseudo_validation.json"
@@ -1304,7 +1410,7 @@ def build(args: argparse.Namespace) -> Mapping[str, object]:
     metadata_path = data_dir / "metadata.json"
     with metadata_path.open("r", encoding="utf-8") as handle:
         metadata = json.load(handle)
-    metadata["schema_version"] = max(int(metadata.get("schema_version", 1)), 4)
+    metadata["schema_version"] = max(int(metadata.get("schema_version", 1)), 5)
     metadata["generated_on"] = date.today().isoformat()
     pseudo_by_species_class = Counter(
         f"{row['species']}/{row['mhc_class']}" for row in final_rows
@@ -1324,6 +1430,21 @@ def build(args: argparse.Namespace) -> Mapping[str, object]:
             "netmhciipan_supported_total": len(official_pairs),
         }
     )
+    if derived_artifacts_pending:
+        stale_count_keys = {
+            "fallback_full",
+            "fallback_af3",
+            "fallback_pbr",
+            "component_targets",
+        }
+        stale_count_keys.update(
+            key
+            for key in metadata["counts"]
+            if key.startswith("pseudo_pbr_projection_")
+        )
+        for key in stale_count_keys:
+            metadata["counts"].pop(key, None)
+    metadata["derived_artifacts_pending_rebuild"] = derived_artifacts_pending
     metadata["quarantine"] = {
         "count": len(quarantine_unique),
         "file": "quarantined_pseudosequences.csv",
@@ -1333,7 +1454,9 @@ def build(args: argparse.Namespace) -> Mapping[str, object]:
             "silently select two sequences for one canonical name."
         ),
     }
-    metadata.setdefault("sources", {}).update(
+    metadata_sources = metadata.setdefault("sources", {})
+    metadata_sources.pop("netmhc_training_pseudo_validation", None)
+    metadata_sources.update(
         {
             "netmhcpan_4_2_supported_names": {
                 "name": f"{OFFICIAL_I_VERSION} public allele.list",
@@ -1347,19 +1470,28 @@ def build(args: argparse.Namespace) -> Mapping[str, object]:
                 "sha256": OFFICIAL_II_LIST_SHA256,
                 "retrieved_on": "2026-11-20",
             },
-            "netmhc_training_pseudo_validation": {
+            "netmhc_training_pseudosequences": {
+                "netmhcpan_file": "NetMHCpan-4.2e-training-pseudoseqs.dat",
                 "netmhcpan_sha256": official_i_hash,
+                "netmhcpan_source_version": DTU_I_PSEUDO_VERSION,
+                "netmhcpan_human_mouse_rows": len(official_i),
+                "netmhcpan_source_page": "https://services.healthtech.dtu.dk/services/NetMHCpan-4.2/",
+                "netmhciipan_file": "NetMHCIIpan-4.3k-training-pseudosequence.2023.dat",
                 "netmhciipan_sha256": official_ii_hash,
+                "netmhciipan_source_version": DTU_II_PSEUDO_VERSION,
+                "netmhciipan_human_mouse_rows": len(official_ii),
+                "netmhciipan_source_page": "https://services.healthtech.dtu.dk/services/NetMHCIIpan-4.3/",
                 "upstream_last_modified": "2026-07-06",
-                "bundled": False,
-                "rows_copied_into_registry": False,
-                "purpose": "local validation gate only",
+                "bundled_in_source_repository": True,
+                "bundled_in_runtime_wheel": False,
+                "rows_used_as_primary_source": True,
+                "scope_note": "Only human and mouse rows enter this registry; other species remain in the attributed source snapshot but are excluded from runtime data.",
             },
         }
     )
     metadata["pseudo_derivation"] = {
         "priority": [
-            "official training validation of independently reconstructed rows",
+            "bundled DTU official training pseudosequence",
             "derived exact PBR",
             "contact-complete deposited sequence",
             "pinned secondary mirror compatibility row",
@@ -1401,8 +1533,26 @@ def parser() -> argparse.ArgumentParser:
         type=Path,
         default=PROJECT_ROOT / "tools" / "reference" / "NetMHCIIpan-4.3-alleles_name.txt",
     )
-    parser.add_argument("--official-pseudo-i", type=Path, required=True)
-    parser.add_argument("--official-pseudo-ii", type=Path, required=True)
+    parser.add_argument(
+        "--official-pseudo-i",
+        type=Path,
+        default=(
+            PROJECT_ROOT
+            / "tools"
+            / "reference"
+            / "NetMHCpan-4.2e-training-pseudoseqs.dat"
+        ),
+    )
+    parser.add_argument(
+        "--official-pseudo-ii",
+        type=Path,
+        default=(
+            PROJECT_ROOT
+            / "tools"
+            / "reference"
+            / "NetMHCIIpan-4.3k-training-pseudosequence.2023.dat"
+        ),
+    )
     return parser
 
 

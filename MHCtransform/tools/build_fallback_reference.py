@@ -78,7 +78,7 @@ def fallback_metadata_fields() -> Dict[str, object]:
     """Return the shared schema fragment for strict and standalone builders."""
 
     return {
-        "schema_version": 4,
+        "schema_version": 5,
         "sequence_kind": (
             "precursor_full (strict default); partial_deposited_protein (legacy opt-in); "
             f"{AF3_DEFINITION} (strict mature extracellular chain); source-partial-v1; "
@@ -108,10 +108,20 @@ def fallback_metadata_fields() -> Dict[str, object]:
                 "scaffolds, not official allele protein sequences."
             ),
         },
+        "pseudo_pbr_contract": {
+            "projection_file": "pseudo_pbr_projection.csv",
+            "rule": (
+                "Every pseudo component must map all contact indices to one strict or "
+                "explicit fallback PBR. Every non-X pseudo residue must match the "
+                "projected PBR residue exactly. DTU X alignment/unknown tokens are "
+                "recorded as explicit wildcards and are never inserted into a protein chain."
+            ),
+            "failure_policy": "Any uncovered component or non-X mismatch fails the build.",
+        },
     }
 
 
-def update_fallback_metadata(data_dir: Path, counts: Mapping[str, int]) -> None:
+def update_fallback_metadata(data_dir: Path, counts: Mapping[str, object]) -> None:
     """Synchronize metadata when this builder is run on its own."""
 
     path = data_dir / "metadata.json"
@@ -121,6 +131,7 @@ def update_fallback_metadata(data_dir: Path, counts: Mapping[str, int]) -> None:
         metadata = json.load(handle)
     metadata.update(fallback_metadata_fields())
     metadata.setdefault("counts", {}).update(counts)
+    metadata["derived_artifacts_pending_rebuild"] = False
     with path.open("w", encoding="utf-8") as handle:
         json.dump(metadata, handle, ensure_ascii=False, indent=2, sort_keys=True)
         handle.write("\n")
@@ -386,31 +397,99 @@ def _choose_template(
     return selected[4], selected[5], selected[1]
 
 
+def _strict_pbr_for_af3(registry: MHCRegistry, af3_candidate: object) -> object:
+    """Return the unique strict PBR cropped from one strict AF3 chain."""
+
+    index = getattr(registry, "_strict_pbr_by_af3_record_id", None)
+    if index is None:
+        grouped: MutableMapping[str, List[object]] = defaultdict(list)
+        for candidate in registry._pbr_sequences:
+            grouped[candidate.source_af3_record_id].append(candidate)
+        index = {key: tuple(value) for key, value in grouped.items()}
+        setattr(registry, "_strict_pbr_by_af3_record_id", index)
+    candidates = index.get(af3_candidate.record_id, ())
+    if len(candidates) != 1:
+        raise ValueError(
+            f"AF3 record {af3_candidate.record_id} resolves to "
+            f"{len(candidates)} strict PBR records"
+        )
+    return candidates[0]
+
+
 def _contact_positions(
     registry: MHCRegistry,
     template: object,
     template_segment: str,
-    reference_alpha: str,
-    reference_beta: str,
 ) -> Tuple[int, ...]:
+    """Project one pseudo component onto its same-locus strict PBR.
+
+    Pseudo contacts are PBR coordinates.  Both MHC classes therefore use the
+    strict PBR crop here; using a complete MHC-II AF3 ectodomain in this path
+    would make fallback compatibility use a different coordinate substrate
+    from the final pseudo/PBR certificate.
+    """
+
+    target_pbr = _strict_pbr_for_af3(registry, template)
     if template.mhc_class == "I":
         positions = registry.metadata["pseudo_definitions"][PSEUDO_I_DEFINITION][
             "mature_reference_positions_1_based"
         ]
-        observed = "".join(template.sequence[position - 1] for position in positions)
-        if observed != template_segment:
-            raise ValueError(f"class-I template pseudo mismatch for {template.allele}")
-        return tuple(positions)
-    definition = registry.metadata["pseudo_definitions"][PSEUDO_II_DEFINITION]
-    if template.chain_role == "alpha":
-        reference = reference_alpha
-        positions = definition["alpha_mature_reference_positions_1_based"]
+        reference_species = template.species
+        reference_locus = template.locus
     else:
-        reference = reference_beta
-        positions = definition["beta_mature_reference_positions_1_based"]
+        locus_positions = registry.metadata.get("pseudo_derivation", {}).get(
+            "mhc_ii_component_contact_positions_1based", {}
+        )
+        if template.locus in locus_positions:
+            positions = locus_positions[template.locus]
+            reference_species = template.species
+            reference_locus = template.locus
+        else:
+            definition = registry.metadata["pseudo_definitions"][PSEUDO_II_DEFINITION]
+            positions = definition[
+                "alpha_mature_reference_positions_1_based"
+                if template.chain_role == "alpha"
+                else "beta_mature_reference_positions_1_based"
+            ]
+            # Mouse components currently use the published generic DR alpha or
+            # beta coordinate frame, exactly as the final projection builder
+            # does; no mouse-locus-specific contact list is defined.
+            reference_species = "human"
+            reference_locus = "DRA" if template.chain_role == "alpha" else "DRB1"
+
+    reference_spec = next(
+        (
+            item
+            for item in registry.metadata["pbr_definitions"]["reference_records"]
+            if item["species"] == reference_species
+            and item["locus"] == reference_locus
+        ),
+        None,
+    )
+    if reference_spec is None:
+        raise ValueError(f"missing PBR reference for {template.allele}")
+    reference_result = registry.allele_to_pbr(
+        reference_spec["allele"],
+        mhc_class=template.mhc_class,
+        species=reference_species,
+    )
+    reference_candidates = tuple(
+        candidate
+        for candidate in reference_result.candidates
+        if candidate.locus == reference_locus
+        and candidate.chain_role == template.chain_role
+    )
+    if len(reference_candidates) != 1:
+        raise ValueError(
+            f"PBR reference {reference_spec['allele']} resolves to "
+            f"{len(reference_candidates)} {reference_locus}/{template.chain_role} records"
+        )
     try:
         return locate_contact_positions(
-            reference, template.sequence, positions, template_segment
+            reference_candidates[0].sequence,
+            target_pbr.sequence,
+            positions,
+            template_segment,
         )
     except ValueError as error:
         raise ValueError(
@@ -430,6 +509,42 @@ def _strict_candidates(registry: MHCRegistry, target: Mapping[str, object]) -> T
     )
 
 
+def _pseudo_compatible_strict_candidates(
+    registry: MHCRegistry,
+    target: Mapping[str, object],
+) -> Tuple[object, ...]:
+    """Return strict chains whose PBR contacts reproduce the target pseudo.
+
+    A deposited chain remains a valid strict biological record even when an
+    upstream DTU pseudosequence snapshot disagrees with the current deposited
+    sequence.  Such a chain must not, however, satisfy the pseudo-to-PBR
+    contract.  In that case the fallback builder emits a separately labelled
+    pseudo-constrained scaffold instead of hiding the disagreement.
+    """
+
+    compatible = []
+    segment = str(target["pseudo_segment"])
+    for candidate in _strict_candidates(registry, target):
+        try:
+            positions = _contact_positions(
+                registry,
+                candidate,
+                segment,
+            )
+        except ValueError:
+            continue
+        candidate_pbr = _strict_pbr_for_af3(registry, candidate)
+        projected = "".join(
+            candidate_pbr.sequence[position - 1] for position in positions
+        )
+        if all(
+            expected == "X" or expected == observed
+            for expected, observed in zip(segment, projected)
+        ):
+            compatible.append(candidate)
+    return tuple(compatible)
+
+
 def _deposited_candidates(registry: MHCRegistry, target: Mapping[str, object]) -> Tuple[object, ...]:
     key = exact_name_key(str(target["allele"]))
     unique = {}
@@ -443,18 +558,11 @@ def _deposited_candidates(registry: MHCRegistry, target: Mapping[str, object]) -
     return tuple(unique[key] for key in sorted(unique))
 
 
-def build_fallback_files(data_dir: Path) -> Mapping[str, int]:
+def build_fallback_files(data_dir: Path) -> Mapping[str, object]:
     registry = MHCRegistry(data_dir)
     targets = _component_targets(registry)
     catalog = _template_catalog(registry, targets)
     full_by_id = {candidate.record_id: candidate for candidate in registry._sequences}
-
-    reference_alpha = registry.allele_to_af3(
-        "HLA-DRA*01:01", mhc_class="II"
-    ).candidates[0].sequence
-    reference_beta = registry.allele_to_af3(
-        "HLA-DRB1*15:01", mhc_class="II"
-    ).candidates[0].sequence
 
     # A tiny number of secondary-mirror pseudo rows conflict with their exact
     # deposited AF3 chain. They are unsuitable as donors and are excluded here;
@@ -469,8 +577,6 @@ def build_fallback_files(data_dir: Path) -> Mapping[str, int]:
                     registry,
                     template,
                     segment,
-                    reference_alpha,
-                    reference_beta,
                 )
             except ValueError:
                 continue
@@ -544,7 +650,10 @@ def build_fallback_files(data_dir: Path) -> Mapping[str, int]:
         pseudo_offset = int(target["pseudo_offset"])
         pseudo_record_id = sorted(target["pseudo_record_ids"])[0]  # type: ignore[arg-type]
         deposited = _deposited_candidates(registry, target)
-        strict_af3 = _strict_candidates(registry, target)
+        strict_af3 = _pseudo_compatible_strict_candidates(
+            registry,
+            target,
+        )
 
         complete_deposited = [candidate for candidate in deposited if candidate.is_complete]
         if not complete_deposited:
@@ -827,14 +936,19 @@ def build_fallback_files(data_dir: Path) -> Mapping[str, int]:
     # PBR fallback rows are a provenance-preserving crop of these finalized
     # AF3 rows, so they must be rebuilt only after fallback_af3_sequences.csv
     # has been written.
-    from build_pbr_reference import build_fallback_pbr_file
+    from build_pbr_reference import (
+        build_fallback_pbr_file,
+        build_pseudo_pbr_projection_file,
+    )
 
     fallback_pbr_count = build_fallback_pbr_file(data_dir)
+    projection_counts = build_pseudo_pbr_projection_file(data_dir)
     return {
         "fallback_full": len(full_unique),
         "fallback_af3": len(af3_unique),
         "fallback_pbr": fallback_pbr_count,
         "component_targets": len(targets),
+        **projection_counts,
     }
 
 

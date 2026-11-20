@@ -32,9 +32,9 @@
 | `netmhcpan-34-v1` | MHC-I 成熟重链参考对齐上的 34 个 peptide-contact 位点；不含 B2M | pan-allele 模型 descriptor，不是结构链 |
 | `netmhciipan-34-v1` | MHC-II α 链 15 位 + β 链 19 位，按参考对齐拼接；允许 `X` | pan-allele 模型 descriptor，不是结构链 |
 
-PBR 与 pseudo 相互配合但不能互换：PBR 是连续、可折叠的结构域并包含全部 pseudo 接触位点；34mer 是非连续模型 descriptor。PBR 适合比较与 pseudo 核验，但 pMHC–TCR 的 AF3 默认仍使用完整胞外链，以保留膜近端结构域及天然界面。
+PBR 与 pseudo 相互配合但不能互换：PBR 是连续、可折叠的结构域并包含全部 pseudo 接触位点；34mer 是非连续模型 descriptor。构建过程执行硬性 pseudo-to-PBR 契约：34 个 pseudo 位点必须全部映射到 PBR，所有非 `X` 残基必须逐位完全一致；DTU 中的 `X` 只记录为 alignment/unknown 通配符，绝不会作为氨基酸写进 PBR 链。PBR 适合比较与 pseudo 核验，但 pMHC–TCR 的 AF3 默认仍使用完整胞外链，以保留膜近端结构域及天然界面。
 
-位点坐标和来源哈希保存在 [`metadata.json`](src/mhctransform/data/metadata.json)。MHC-II pseudo 使用经过校准的参考对齐列，不能把统一 precursor 下标直接套到所有链。后备策略逐级累积且默认关闭：`none` → `partial` → `imputed` → `pseudo-scaffold`。34mer 仍是多对多：15,478 个人 MHC-I 名称仅对应 4,279 个唯一 pseudo，8,948 个人 MHC-II 分子名称仅对应 1,695 个。因此 imputed 输出只是兼容 scaffold，不是真实全长恢复。
+位点坐标和来源哈希保存在 [`metadata.json`](src/mhctransform/data/metadata.json)。MHC-II pseudo 使用经过校准的参考对齐列，不能把统一 precursor 下标直接套到所有链。后备策略逐级累积且默认关闭：`none` → `partial` → `imputed` → `pseudo-scaffold`。34mer 仍是多对多，也不能唯一确定接触位点之外的残基；因此 imputed 输出只是兼容 scaffold，不是真实全长恢复。
 
 ## 当前本地参考库
 
@@ -44,21 +44,21 @@ PBR 与 pseudo 相互配合但不能互换：PBR 是连续、可折叠的结构�
 | 默认可用的 complete precursor records | 11,283 | 2,525 | 9 | 14 |
 | 严格 AF3-ready extracellular-chain records | 11,004 | 2,456 | 9 | 15 |
 | 严格 PBR chain records | 11,003 | 2,456 | 8 | 15 |
-| 34-aa records | 15,478 | 8,948 | 10 | 8 |
+| 34-aa records | 15,478 | 8,968 | 11 | 8 |
 
 人 HLA 来自固定的 IPD-IMGT/HLA 3.66.0 / commit `b2055ea`，并结合同版官方 `Full/Partial` 状态；鼠 MHC 和人/鼠 B2M 来自显式 UniProt accession。AF3 与 PBR 边界由 reviewed UniProt topology/domain 标注投影到同版 IPD 蛋白比对，严格输出逐条验证为 parent precursor 的连续子序列。
 
-34-aa registry 以 NetMHCpan 4.2f 与 NetMHCIIpan 4.3k 的公开支持名称快照为标准。人/鼠范围分别含 10,395 个 MHC-I 名称和 11,344 个 MHC-II 分子；本版分别为其中 8,743 与 8,956 个提供经审查的 34-aa 伪序列。出现在支持清单中并不等于已知序列：若 deposited source 与经审查 legacy 行都不能覆盖所需接触序列，构建器会报告不可用，不会补猜 pseudo。
+34-aa registry 使用两类不同的 DTU 资源。NetMHCpan 4.2f 与 NetMHCIIpan 4.3k 的公开支持名称快照定义比较范围；随库保存的 `NetMHCpan-4.2e-training-pseudoseqs.dat` 和 `NetMHCIIpan-4.3k-training-pseudosequence.2023.dat` 是 training pseudosequence 的直接主来源。这里的 `4.2e` 是用户提供的 MHC-I pseudo 数据版本，并不表示另一份 4.2f support list 属于 4.2e。人/鼠范围中，本地覆盖 10,395 个 MHC-I 支持名称中的 8,744 个，以及 11,344 个 MHC-II 支持分子中的 8,976 个。
 
-捆绑的 24,444 行 pseudo（MHC-I 15,488；MHC-II 8,956）明确区分证据：`derived_exact_pbr` 13,560、`derived_contact_complete_full` 89、`derived_contact_complete_partial` 7,223、`legacy_secondary` 3,572；没有捆绑任何 `official_reference` 行。可选的本地 DTU training pseudo 仅作为 validation oracle，不会把 oracle-only 行复制进 registry。Oracle 精确核验为 MHC-I 215/216（只缺 `H-2-Kq`）和 MHC-II 5,565/5,631。4 条含内部 indel 的 MHC-I 记录通过 oracle 在独立 alignment contact-column 候选间进行选择后安全恢复；其 sequence evidence 仍是 deposited protein，不是复制 oracle。partial 只有在全部接触位点无歧义映射且没有 `X`、gap 或插补时才能生成 pseudo。
+捆绑的 24,465 行 pseudo（MHC-I 15,489；MHC-II 8,976）明确区分证据：DTU 直接 pseudo 5,848、DTU 链组件组合 3,339、strict PBR 精确派生 10,808、接触位点完整的 deposited partial 派生 3,844、legacy secondary 626。`H-2-Kq` 现由 MHC-I DTU 快照直接提供。原始文本快照及其 SHA-256 会随库保留以便复现；仓库不包含 DTU 可执行程序或模型。
 
-现行命名处理也显式记录：历史 `HLA-DQA1*01:07` 与 `HLA-DRB1*15:13` 输入分别解析到当前 `HLA-DQA1*01:07Q` 与 `HLA-DRB1*15:13Q`。`HLA-DRB1*13:10` 保留的 `legacy_secondary` 行是 PUFFIN/NetMHC-compatible `ESSFDSYSIDKATYHVGFT`（`official_training_exact`）；它带有与 current-IPD-derived `ESSFDYFDIDKATYHVVFT` 冲突的质量标志，而不是静默覆盖任一观察。Component registry 含 4,386 条链 pseudo，另有 280 条拒绝/冲突记录隔离。
+现行命名处理也显式记录：历史 `HLA-DQA1*01:07` 与 `HLA-DRB1*15:13` 输入分别解析到当前 `HLA-DQA1*01:07Q` 与 `HLA-DRB1*15:13Q`；`DRB1_13100` 这类可变位数字段会解析成 `HLA-DRB1*13:100`，而不是 `*131:00`。DTU pseudo 对 pseudo 表示具有优先级，但不兼容的 deposited strict PBR 不会被静默改写；strict 记录仍保留为生物来源证据，`--require-pseudo-match` 会在需要时选择单独标注的 synthetic fallback。Component registry 含 4,390 条链 pseudo，另有 344 条拒绝/冲突记录隔离。
 
-`pseudo_components.csv` 是只包含已解析、可独立证明链组分的审计表，并不保证每条 MHC-II pair 都能完整拆分。具体而言，64 条保留的 `legacy_secondary` pair（4 个有争议的 DPB1 beta 组分 × 16 个 DPA1 alpha partner）因 legacy、current-IPD-derived 与本地 oracle 证据冲突，故意不把未解析 beta 写入 component 表。Pair 行连同来源仍保留，但争议 beta 序列不会被提升为独立组分。
+`pseudo_components.csv` 是已解析链组分的审计表。DTU 组件对 pseudo 表示具有优先级，其中包括 4 个与当前 deposited 派生结果冲突的 DPB1 组件。对应 strict deposited PBR 保持不变；pseudo-compatible 结构后备会单独标注。由此产生的 MHC-II pair 只是模型支持的链组合，不代表 haplotype 或体内稳定性证据。
 
 deposited records 包含不完整条目。默认查询只返回官方 `Full` 且无未知残基的人链，或通过 accession/fragment/长度检查的鼠链；片段与合成构建必须显式开启。`partial` 不会补尾，`imputed` 要求 deposited 引导，`pseudo-scaffold` 是最低证据级别。带 `N/L/S/Q/C/A` 表达后缀的人 HLA 默认仍禁止进入 AF3。当前鼠库是常用、可追溯 H-2 集合，不声称穷尽全部 IPD-MHC。
 
-重建后的 fallback registry 含 18,079 个 component targets、13,217 条 full/fragment、6,626 条 AF3 和对应的 6,626 条 PBR。它们是构建/来源片段数量，不代表新增了同等数量的已验证生物学全长序列。
+当前构建含 full fallback 13,219 条、AF3 fallback 6,628 条、PBR fallback 6,628 条。硬合同覆盖全部 18,080 个唯一 pseudo 链组件：11,559 个选择 strict PBR，6,521 个选择显式 fallback，未覆盖为 0。仅 17 个组件需要最多 1 aa 的有界坐标恢复，其中 12 个含 alignment-gap contact，最大偏移为 1 aa。这些计数由构建器写入 [`metadata.json`](src/mhctransform/data/metadata.json)；它们描述构建或来源片段，不代表新增了同等数量的已验证生物学全长序列。
 
 ## 使用
 
@@ -114,12 +114,17 @@ mhctransform molecule-to-pbr 'HLA-A*02:01' --class I
 mhctransform molecule-to-pbr \
   'HLA-DRA*01:01/HLA-DRB1*15:01' --class II
 
+# 只返回经过 DTU pseudo 契约认证的 strict/fallback PBR
+mhctransform molecule-to-pbr \
+  'HLA-DRA*01:01/HLA-DRB1*13:10' --class II \
+  --require-pseudo-match
+
 # 反查返回所有精确链候选
 mhctransform pbr-to-allele @pbr_chain.txt \
   --class I --definition mhci-alpha1-alpha2-v1
 ```
 
-MHC-I 的 `molecule-to-pbr` 有意省略 alpha3 与 B2M；MHC-II 返回两个 sequence object，绝不人工拼接。常见 reviewed domain 长度为 MHC-I 182 aa、MHC-II alpha1 84–96 aa、beta1 90–95 aa；实际边界按位点和等位基因投影。后备 PBR 与 AF3 后备一样保留 observed/imputed spans 和证据等级。
+MHC-I 的 `molecule-to-pbr` 有意省略 alpha3 与 B2M；MHC-II 返回两个 sequence object，绝不人工拼接。常见 reviewed domain 长度为 MHC-I 182 aa、MHC-II alpha1 84–96 aa、beta1 90–95 aa；实际边界按位点和等位基因投影。`--require-pseudo-match` 会依据 [`pseudo_pbr_projection.csv`](src/mhctransform/data/pseudo_pbr_projection.csv) 为每个组件选择认证链：优先兼容的 strict PBR；若 DTU pseudo 与 deposited strict 链冲突，则保留 strict 链不变，并返回单独标注的 synthetic fallback。MHC-II alpha1 与 beta1 分别认证。后备 PBR 与 AF3 后备一样保留 observed/imputed spans 和证据等级。
 
 ### AF3 胞外链与两链配对
 
@@ -250,7 +255,7 @@ HLA-A*02:01 的 AF3 链最后是 `...QPTIPI`；下一位 precursor 309 的 `V` �
 
 ## 重新生成数据
 
-核心生成脚本会复用本地缓存；首次在线运行需要访问固定版 IPD-IMGT/HLA 与 UniProt。没有本地 DTU oracle 文件时仍可重建独立 strict/PBR 与 secondary 资产，但不能复现经过 oracle gate 的发布 registry：
+核心生成脚本会复用本地缓存；首次在线运行需要访问固定版 IPD-IMGT/HLA 与 UniProt。发布 registry 所需的两份 DTU pseudosequence 快照已经固定保存在 `tools/reference/`，默认直接使用：
 
 ```bash
 python3 tools/build_reference.py
@@ -264,17 +269,14 @@ python3 tools/build_fallback_reference.py
 python3 tools/build_pbr_reference.py
 ```
 
-DTU 的公开支持名称快照以固定 SHA-256 保存在 `tools/reference/`。要复现发布数据，可把 training pseudo 下载到本地缓存，并且只作为 validation oracle 传给集成 builder；原始归档、解出的 oracle 文件和 oracle-only 行都不会提交：
+支持名称与 pseudosequence 快照都以固定 SHA-256 保存在 `tools/reference/`。发布构建直接使用这些文件：
 
 ```bash
-python3 tools/fetch_netmhc_training_pseudos.py --cache-dir /path/to/netmhc-cache
-
-python3 tools/build_reference.py \
-  --netmhcpan-training-pseudo /path/to/netmhc-cache/NetMHCpan-4.2-pseudoseqs.dat \
-  --netmhciipan-training-pseudo /path/to/netmhc-cache/NetMHCIIpan-4.3-pseudosequence.2023.dat
+python3 tools/build_netmhc_pseudo_reference.py
+python3 tools/build_fallback_reference.py
 ```
 
-若严格/PBR 资产已经生成，也可运行 `build_netmhc_pseudo_reference.py --official-pseudo-i ... --official-pseudo-ii ...`，随后运行 `build_fallback_reference.py`；fallback builder 会同步刷新 fallback PBR。脚本不会继承旧 `mhcii_model_input.csv` 的裁剪。Human full 记录结合同版 FASTA/status；AF3/PBR 通过固定 IPD alignment 投影 reviewed UniProt 特征，并要求唯一映射回 parent。MHC-I 34 位及 MHC-II alpha15+beta19 alignment mapping 均有版本。只有当 full、PBR 或 deposited partial 可无歧义覆盖全部接触位点时才生成 pseudo；缺位点不会插补。生成输出与冲突报告稳定排序且具有确定性；`metadata.json` 与 `pseudo_validation.json` 记录的是 source input 哈希，并非每个输出文件的哈希。
+可用 `--official-pseudo-i` 与 `--official-pseudo-ii` 显式覆盖随库默认路径，用于受控重建。Fallback builder 会同步刷新 fallback PBR 及硬校验的 `pseudo_pbr_projection.csv`；若任何 pseudo 组件缺少接触坐标，或任一非 `X` 残基与选定 PBR 不一致，构建会直接失败。脚本不会继承旧 `mhcii_model_input.csv` 的裁剪。Human full 记录结合同版 FASTA/status；AF3/PBR 通过固定 IPD alignment 投影 reviewed UniProt 特征，并要求唯一映射回 parent。MHC-I 34 位及 MHC-II alpha15+beta19 alignment mapping 均有版本。生成输出与冲突报告稳定排序且具有确定性；`metadata.json` 与 `pseudo_validation.json` 记录的是 source input 哈希，并非每个输出文件的哈希。
 
 ## 测试
 
@@ -282,7 +284,7 @@ python3 tools/build_reference.py \
 PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
 
-单元测试覆盖 strict/fallback 证据隔离、稀有 HLA/H-2、表达后缀与物种过滤、碰撞安全反查、完整模板要求、PBR 双链与边界及 oracle-gated pseudo 核验。严格 AF3/PBR 链均满足 parent-subsequence invariant；无信号肽的 P14437 另按 reviewed UniProt 胞外 topology 核验。确定性另在 release validation 中通过重复完整重建并比较输出哈希检查。
+单元测试覆盖 strict/fallback 证据隔离、稀有 HLA/H-2、表达后缀与物种过滤、碰撞安全反查、完整模板要求、PBR 双链与边界、DTU 主来源解析及 pseudo-to-PBR 硬契约。严格 AF3/PBR 链均满足 parent-subsequence invariant；无信号肽的 P14437 另按 reviewed UniProt 胞外 topology 核验。确定性另在 release validation 中通过重复完整重建并比较输出哈希检查。
 
 ## 重要边界
 
@@ -299,4 +301,4 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 
 ## 许可证与数据条款
 
-本包代码采用 [MIT License](LICENSE)。捆绑及派生参考数据保留上游署名和适用条款；MIT 不会重新许可 IPD-IMGT/HLA、UniProt、DTU 或 PUFFIN 数据。本仓库不分发 NetMHCpan/NetMHCIIpan 可执行程序、模型文件或原始训练归档。
+本包代码采用 [MIT License](LICENSE)。捆绑及派生参考数据保留上游署名和适用条款；MIT 不会重新许可 IPD-IMGT/HLA、UniProt、DTU 或 PUFFIN 数据。两份 DTU pseudosequence 文本快照作为直接数据输入随库保存；本仓库不分发 NetMHCpan/NetMHCIIpan 可执行程序、模型文件或完整训练归档。
