@@ -63,6 +63,8 @@ mhctransform allele-to-pseudo 'HLA-A*02:01' \
 
 反向查询使用 `full-to-allele`、`af3-to-allele`、`pbr-to-allele` 和 `pseudo-to-allele`。严格序列会返回全部 exact 候选；后备构建默认不参与反查，只有显式开启时才返回 `compatible_*` 候选，且不声称生物学精确匹配。详细定义、覆盖范围和审核结论见 [`MHCtransform/README.zh-CN.md`](MHCtransform/README.zh-CN.md) 与 [`MHCtransform/AUDIT_REPORT.md`](MHCtransform/AUDIT_REPORT.md)。
 
+稀有 MHC 恢复均绑定可审计 accession：可解决目标已加入 exact 记录，18 条 partial PBR 只在真实未知位置保留 `X`；`H-2-IEu` 可输出 contact 全精确的 pseudo 以及 exact/masked 混合 PBR 双链，但不会把不完整 beta 链作为 AF3 输入。
+
 ### TCR V/J/CDR3 -> 适合 AF3 的 alpha/beta 胞外链
 
 准备至少含有 `TRAV, TRAJ, CDR3A, TRBV, TRBJ, CDR3B` 的 CSV：

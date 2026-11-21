@@ -152,7 +152,17 @@ class FallbackAF3SequenceCandidate:
 
 @dataclass(frozen=True)
 class FallbackPBRSequenceCandidate:
-    """A PBR cropped from an exact or engineered AF3 fallback chain."""
+    """An opt-in non-strict PBR representation.
+
+    ``sequence_representation`` separates a template-completed construct from
+    a partial chain whose genuinely unknown residues are encoded as ``X``.
+    ``unknown_*`` is deliberately distinct from ``imputed_*``: an unknown
+    residue has not been asserted to equal a template residue. For a masked
+    candidate, ``source_af3_record_id`` identifies the chain used to establish
+    the PBR coordinate frame only; the masked sequence is not asserted to be a
+    literal AF3-chain substring. ``masked_from_record_id`` links the separate
+    template-completed PBR record without reusing its identity.
+    """
 
     record_id: str
     allele: str
@@ -162,16 +172,20 @@ class FallbackPBRSequenceCandidate:
     chain_role: str
     locus: str
     definition_id: str
+    sequence_representation: str
     sequence: str
     source_af3_record_id: str
     af3_start_1based: int
     af3_end_1based: int
     evidence_level: str
     observed_spans_1based: str
+    unknown_spans_1based: str
     imputed_spans_1based: str
     observed_residue_count: int
+    unknown_residue_count: int
     imputed_residue_count: int
     source_record_ids: Tuple[str, ...]
+    masked_from_record_id: str
     template_record_id: str
     template_allele: str
     target_pseudo_record_id: str

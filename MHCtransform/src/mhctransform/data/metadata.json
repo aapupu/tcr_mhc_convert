@@ -42,7 +42,9 @@
     "component_targets": 18080,
     "fallback_af3": 6628,
     "fallback_full": 13219,
-    "fallback_pbr": 6628,
+    "fallback_pbr": 6646,
+    "expression_qualified_fallback_replacements": 3,
+    "masked_partial_pbr": 18,
     "full_by_species_class": {
       "human/I": 20066,
       "human/II": 9419,
@@ -93,6 +95,7 @@
   "derived_artifacts_pending_rebuild": false,
   "fallback_definitions": {
     "af3-soluble-extracellular-imputed-v1": "Synthetic AF3 ectodomain scaffold with deposited-observed and non-observed/imputed spans.",
+    "pbr-partial-masked-v1": "Opt-in contiguous PBR retaining deposited residues exactly and encoding only unobserved positions as X. X is a missing-data/MASK sentinel, not a biological residue or an AF3-ready protein sequence.",
     "policy_order": [
       "none",
       "partial",
@@ -104,7 +107,54 @@
     "source_exact_ectodomain": "A deposited fragment that covers every residue of the selected exact extracellular chain; no AF3 residue is imputed.",
     "warning": "A 34-aa pseudosequence is not invertible. Imputed constructs are structural scaffolds, not official allele protein sequences."
   },
+  "expression_qualified_fallback_overrides": {
+    "allele": "HLA-A*30:14L",
+    "files": [
+      "expression_qualified_fallback_full_overrides.csv",
+      "expression_qualified_fallback_af3_overrides.csv",
+      "expression_qualified_fallback_pbr_overrides.csv"
+    ],
+    "rule": "Replace the linked historical suffixless fallback records by old record ID; retain suffixless spellings only as aliases and gate structural fallback use behind allow_expression_qualified."
+  },
   "generated_on": "2026-11-21",
+  "targeted_recovery": {
+    "base_counts_note": "The generated counts above describe the pinned base tables plus the shared masked-PBR sidecar. Runtime lookup also loads the small hand-audited overlays listed here; MHCRegistry.stats() reports the combined totals.",
+    "files": [
+      "exact_recovery_full_sequences.csv",
+      "exact_recovery_af3_sequences.csv",
+      "exact_recovery_fallback_af3_sequences.csv",
+      "exact_recovery_pbr_sequences.csv",
+      "exact_recovery_pseudo_sequences.csv",
+      "exact_recovery_pseudo_pbr_projection.csv",
+      "exact_recovery_molecule_pairs.csv",
+      "historical_name_aliases.csv"
+    ],
+    "overlay_counts": {
+      "full_sequences": 11,
+      "complete_full_sequences": 7,
+      "af3_sequences": 7,
+      "exact_ectodomain_fallback_af3_sequences": 2,
+      "strict_pbr_sequences": 10,
+      "partial_masked_pbr_sequences": 1,
+      "pseudo_sequences": 11,
+      "pseudo_pbr_projection_rows": 12,
+      "molecule_pairs": 8,
+      "historical_name_aliases": 1
+    },
+    "runtime_counts": {
+      "full_sequences": 29525,
+      "complete_full_sequences": 13838,
+      "af3_sequences": 13491,
+      "strict_pbr_sequences": 13492,
+      "fallback_af3_sequences": 6630,
+      "fallback_pbr_sequences": 6646,
+      "partial_masked_pbr_sequences": 18,
+      "pseudo_sequences": 24476,
+      "pseudo_pbr_projection_components": 18091,
+      "molecule_pairs": 16
+    },
+    "scope": "Targeted accession-backed recovery only; no nearest-neighbour allele substitution. H-2-IEu uses an exact P14439 alpha chain and a one-position partial-masked beta1 PBR from M12826.1/AAA39645.1; every one of its 34 pseudo contact residues is observed, but no beta AF3 chain is asserted."
+  },
   "pbr_definitions": {
     "boundary_policy": "Same-species/locus alignment projection from reviewed UniProt Alpha-1/Beta-1 REGION features for MHC-II and adjacent Alpha-1 plus Alpha-2 REGION features for MHC-I.",
     "mhci-alpha1-alpha2-v1": {
@@ -612,16 +662,17 @@
   },
   "pseudo_pbr_contract": {
     "failure_policy": "Any uncovered component or non-X mismatch fails the build.",
+    "masked_partial_projection_overrides": "masked_partial_pbr_projections.csv",
     "projection_file": "pseudo_pbr_projection.csv",
-    "rule": "Every pseudo component must map all contact indices to one strict or explicit fallback PBR. Every non-X pseudo residue must match the projected PBR residue exactly. DTU X alignment/unknown tokens are recorded as explicit wildcards and are never inserted into a protein chain."
+    "rule": "Every pseudo component must map all contact indices to one strict or explicit fallback PBR. Every non-X pseudo residue must match the projected PBR residue exactly. DTU pseudo X tokens remain explicit alignment/unknown wildcards. Separately labelled partial-masked PBRs may encode an unobserved position as X; strict PBR and AF3 chains remain X-free."
   },
   "quarantine": {
     "count": 344,
     "file": "quarantined_pseudosequences.csv",
     "rule": "Preserve fixed legacy-source conflicts and recompute current secondary-vs-derived conflicts on every overlay build; never silently select two sequences for one canonical name."
   },
-  "schema_version": 5,
-  "sequence_kind": "precursor_full (strict default); partial_deposited_protein (legacy opt-in); af3-soluble-extracellular-v1 (strict mature extracellular chain); source-partial-v1; precursor-imputed-v1; af3-soluble-extracellular-imputed-v1 (all fallback representations require explicit opt-in)",
+  "schema_version": 6,
+  "sequence_kind": "precursor_full (strict default); partial_deposited_protein (legacy opt-in); af3-soluble-extracellular-v1 (strict mature extracellular chain); source-partial-v1; pbr-partial-masked-v1; precursor-imputed-v1; af3-soluble-extracellular-imputed-v1 (all fallback representations require explicit opt-in)",
   "sources": {
     "af3_human_alignments": {
       "commit": "b2055ea",

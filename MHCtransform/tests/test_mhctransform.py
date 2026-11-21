@@ -10,7 +10,11 @@ from pathlib import Path
 
 from mhctransform import MHCRegistry, MHCTransformError
 from mhctransform.cli import main as cli_main
-from mhctransform.fallback import expand_positions
+from mhctransform.fallback import (
+    MASKED_PARTIAL_EVIDENCE,
+    MASKED_PBR_REPRESENTATION,
+    expand_positions,
+)
 from mhctransform.pbr import (
     PBR_I_DEFINITION,
     PBR_II_ALPHA_DEFINITION,
@@ -1156,6 +1160,249 @@ class RegistryTests(unittest.TestCase):
                 parents[candidate.template_record_id].is_complete,
                 candidate.allele,
             )
+
+    def test_targeted_partial_masked_pbr_provenance_is_honest(self):
+        expected_unknown_counts = {
+            "HLA-A*02:402": 1,
+            "HLA-A*02:50": 1,
+            "HLA-A*03:19": 1,
+            "HLA-A*24:19": 1,
+            "HLA-A*25:03": 1,
+            "HLA-A*30:14L": 1,
+            "HLA-A*30:22": 1,
+            "HLA-B*08:03": 1,
+            "HLA-B*27:16": 1,
+            "HLA-B*41:05": 1,
+            "HLA-B*44:40": 1,
+            "HLA-B*45:06": 1,
+            "HLA-C*08:14": 1,
+            "HLA-DPA1*02:04": 6,
+            "HLA-DRB1*03:03": 6,
+            "H2-Aa*q": 12,
+            "H2-Aa*u": 6,
+            "H2-Eb1*u": 1,
+        }
+        masked = {
+            candidate.allele: candidate
+            for candidate in self.registry._fallback_pbr_sequences
+            if candidate.evidence_level == MASKED_PARTIAL_EVIDENCE
+        }
+        self.assertEqual(set(masked), set(expected_unknown_counts))
+
+        all_fallback = {
+            candidate.record_id: candidate
+            for candidate in self.registry._fallback_pbr_sequences
+        }
+        deposited = {
+            candidate.record_id: candidate
+            for candidate in (
+                *self.registry._sequences,
+                *self.registry._exact_recovery_sequences,
+            )
+        }
+        fallback_af3 = {
+            candidate.record_id: candidate
+            for candidate in self.registry._fallback_af3_sequences
+        }
+        for allele, expected_count in expected_unknown_counts.items():
+            with self.subTest(allele=allele):
+                candidate = masked[allele]
+                unknown = set(expand_positions(candidate.unknown_spans_1based))
+                observed = set(expand_positions(candidate.observed_spans_1based))
+                x_positions = {
+                    index
+                    for index, residue in enumerate(candidate.sequence, start=1)
+                    if residue == "X"
+                }
+                self.assertEqual(candidate.sequence_representation, MASKED_PBR_REPRESENTATION)
+                self.assertEqual(candidate.unknown_residue_count, expected_count)
+                self.assertEqual(x_positions, unknown)
+                self.assertFalse(unknown & observed)
+                self.assertEqual(candidate.imputed_spans_1based, "")
+                self.assertEqual(candidate.imputed_residue_count, 0)
+                if candidate.masked_from_record_id:
+                    self.assertNotEqual(
+                        candidate.record_id, candidate.masked_from_record_id
+                    )
+                    self.assertIn(candidate.masked_from_record_id, all_fallback)
+                else:
+                    self.assertIn(
+                        "no_imputed_counterpart", candidate.quality_flags
+                    )
+
+                observed_sequence = "".join(
+                    candidate.sequence[position - 1] for position in sorted(observed)
+                )
+                source_sequences = [
+                    deposited[record_id].sequence
+                    for record_id in candidate.source_record_ids
+                ]
+                self.assertTrue(
+                    any(sequence.startswith(observed_sequence) for sequence in source_sequences)
+                )
+                if candidate.source_af3_record_id:
+                    coordinate_source = fallback_af3[candidate.source_af3_record_id]
+                    self.assertNotEqual(
+                        candidate.sequence,
+                        coordinate_source.sequence[
+                            candidate.af3_start_1based - 1 : candidate.af3_end_1based
+                        ],
+                    )
+
+        self.assertTrue(all("X" not in item.sequence for item in self.registry._pbr_sequences))
+        self.assertTrue(all("X" not in item.sequence for item in self.registry._af3_sequences))
+        self.assertTrue(
+            all("X" not in item.sequence for item in self.registry._fallback_af3_sequences)
+        )
+
+    def test_partial_masked_pbr_is_opt_in_and_reverse_is_compatible(self):
+        hidden = self.registry.allele_to_pbr("HLA-A*02:50", mhc_class="I")
+        masked = self.registry.allele_to_pbr(
+            "HLA-A*02:50", mhc_class="I", fallback="partial"
+        )
+        imputed = self.registry.allele_to_pbr(
+            "HLA-A*02:50", mhc_class="I", fallback="imputed"
+        )
+        self.assertEqual(hidden.status, "not_found")
+        self.assertEqual(masked.representation, MASKED_PBR_REPRESENTATION)
+        self.assertEqual(masked.evidence, MASKED_PARTIAL_EVIDENCE)
+        self.assertEqual(masked.candidates[0].sequence[:2], "XS")
+        self.assertNotIn("X", imputed.candidates[0].sequence)
+        self.assertEqual(imputed.evidence, "partial_guided_imputed")
+
+        with self.assertRaisesRegex(MHCTransformError, "unsupported residue.*X"):
+            self.registry.pbr_to_alleles(masked.candidates[0].sequence, mhc_class="I")
+        reverse = self.registry.pbr_to_alleles(
+            masked.candidates[0].sequence,
+            mhc_class="I",
+            include_fallback="partial",
+        )
+        self.assertEqual(reverse.status, "compatible_unique")
+        self.assertEqual(reverse.representation, "partial_masked_pbr_compatible_match")
+        self.assertEqual(reverse.candidates[0].allele, "HLA-A*02:50")
+
+        certified = self.registry.allele_to_pbr(
+            "HLA-A*02:50", mhc_class="I", require_pseudo_match=True
+        )
+        self.assertEqual(
+            certified.representation, "pseudo_compatible_partial_masked_pbr"
+        )
+        self.assertEqual(certified.fallback_used, "partial")
+        self.assertEqual(certified.candidates[0].record_id, masked.candidates[0].record_id)
+        self.assertTrue(any("genuinely unobserved" in note for note in certified.notes))
+
+    def test_partial_masked_mhcii_pbrs_remain_two_chain_molecules(self):
+        expected = {
+            "HLA-DPA1*02:04/HLA-DPB1*05:01": (6, 0),
+            "HLA-DRB1*03:03": (0, 6),
+            "H-2-IAq": (12, 0),
+            "H-2-IAu": (6, 0),
+            "H-2-IEu": (0, 1),
+        }
+        for name, x_counts in expected.items():
+            with self.subTest(name=name):
+                result = self.registry.molecule_to_pbr_chains(
+                    name, mhc_class="II", fallback="partial"
+                )
+                self.assertEqual(result.status, "exact_unique")
+                self.assertEqual(
+                    result.representation,
+                    "peptide_binding_region_partial_masked_molecule",
+                )
+                molecule = result.candidates[0]
+                self.assertEqual(
+                    tuple(chain.chain_role for chain in molecule.chains),
+                    ("alpha", "beta"),
+                )
+                self.assertEqual(
+                    tuple(chain.sequence.count("X") for chain in molecule.chains),
+                    x_counts,
+                )
+
+    def test_hla_a_30_14_l_keeps_suffix_pseudo_and_expression_gate(self):
+        pseudo = self.registry.allele_to_pseudo(
+            "HLA-A*30:14L",
+            mhc_class="I",
+            definition_id=PSEUDO_I_DEFINITION,
+        )
+        self.assertEqual(pseudo.status, "exact_unique")
+        self.assertEqual(pseudo.candidates[0].canonical_name, "HLA-A*30:14L")
+        self.assertEqual(
+            pseudo.candidates[0].pseudo_sequence,
+            "YSAMYQENVAQTDVDTLYIIYEHYTWAWLAYTWY",
+        )
+        self.assertIn("low_expression_suffix_L", pseudo.candidates[0].quality_flags)
+        self.assertIn("d715768dc9d0544fd33b", pseudo.candidates[0].source_record_ids)
+
+        blocked = self.registry.allele_to_pbr(
+            "HLA-A*30:14L", mhc_class="I", fallback="partial"
+        )
+        allowed = self.registry.allele_to_pbr(
+            "HLA-A*30:14L",
+            mhc_class="I",
+            fallback="partial",
+            allow_expression_qualified=True,
+        )
+        self.assertEqual(blocked.status, "not_found")
+        self.assertEqual(allowed.status, "exact_unique")
+        self.assertEqual(allowed.candidates[0].allele, "HLA-A*30:14L")
+        self.assertEqual(allowed.candidates[0].sequence[0], "X")
+
+        af3_blocked = self.registry.allele_to_af3(
+            "HLA-A*30:14L", mhc_class="I", fallback="pseudo-scaffold"
+        )
+        af3_allowed = self.registry.allele_to_af3(
+            "HLA-A*30:14L",
+            mhc_class="I",
+            fallback="pseudo-scaffold",
+            allow_expression_qualified=True,
+        )
+        af3_historical_alias = self.registry.allele_to_af3(
+            "HLA-A*30:14",
+            mhc_class="I",
+            fallback="pseudo-scaffold",
+            allow_expression_qualified=True,
+        )
+        self.assertEqual(af3_blocked.status, "not_found")
+        self.assertEqual(af3_allowed.status, "exact_unique")
+        self.assertEqual(af3_historical_alias.status, "exact_unique")
+        self.assertEqual(af3_allowed.candidates[0].allele, "HLA-A*30:14L")
+        self.assertEqual(
+            af3_allowed.candidates[0].record_id,
+            af3_historical_alias.candidates[0].record_id,
+        )
+        self.assertIn(
+            "expression_qualified_target", af3_allowed.candidates[0].quality_flags
+        )
+        self.assertNotIn("X", af3_allowed.candidates[0].sequence)
+        self.assertNotIn(
+            "b83e3b6d43bbdb9f8276",
+            {candidate.record_id for candidate in self.registry._fallback_af3_sequences},
+        )
+        self.assertNotIn(
+            "5b282b15660f48238bb5",
+            {candidate.record_id for candidate in self.registry._fallback_pbr_sequences},
+        )
+
+    def test_masked_partial_assets_are_packaged_and_counted(self):
+        data = resources.files("mhctransform").joinpath("data")
+        self.assertTrue(data.joinpath("masked_partial_pbr_sequences.csv").is_file())
+        self.assertTrue(data.joinpath("masked_partial_pbr_projections.csv").is_file())
+        stats = self.registry.stats()
+        self.assertEqual(stats["masked_partial_pbr_records"], 18)
+        self.assertEqual(stats["fallback_pbr_records"], 6646)
+        self.assertEqual(
+            stats["fallback_pbr_records"],
+            self.registry.metadata["counts"]["fallback_pbr"],
+        )
+        self.assertEqual(self.registry.metadata["counts"]["masked_partial_pbr"], 18)
+        self.assertEqual(stats["expression_qualified_fallback_replacements"], 3)
+        self.assertEqual(
+            self.registry.metadata["counts"][
+                "expression_qualified_fallback_replacements"
+            ],
+            3,
+        )
 
 
 if __name__ == "__main__":

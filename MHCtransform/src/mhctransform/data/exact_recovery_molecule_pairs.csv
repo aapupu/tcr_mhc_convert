@@ -1,0 +1,9 @@
+canonical_name,aliases,species,mhc_class,alpha_or_heavy,beta_or_companion,source
+H-2-IAf,H2-IAf,mouse,II,H2-Aa*f,H2-Ab1*f,Targeted exact recovery: UniProtKB P14435/P06346; IMGT mouse haplotype nomenclature
+H-2-IAg7,H2-IAg7,mouse,II,H2-Aa*d,H2-Ab1*g7,Targeted exact recovery: GenBank K01923.1/M15848.1; NOD g7 beta paired with d alpha
+H-2-IAr,H2-IAr,mouse,II,H2-Aa*r,H2-Ab1*r,Targeted exact recovery: GenBank KU885978.1/KU885979.1; RIIIS/J I-Ar notes; PMID 27148821
+H-2-IEu,H2-IEu,mouse,II,H2-Ea*u,H2-Eb1*u,Targeted contact-complete partial recovery: UniProtKB P14439 and GenBank M12826.1/AAA39645.1; PMID 3755150
+HLA-DRA*01:02/HLA-DRB1*03:01,HLA-DRA*01:02+HLA-DRB1*03:01,human,II,HLA-DRA*01:02,HLA-DRB1*03:01,Explicit deposited HLA-DR chain pair; no beta-only shorthand remapping
+HLA-DRA*01:02/HLA-DRB1*13:01,HLA-DRA*01:02+HLA-DRB1*13:01,human,II,HLA-DRA*01:02,HLA-DRB1*13:01,Explicit deposited HLA-DR chain pair; no beta-only shorthand remapping
+HLA-DRA*01:02/HLA-DRB3*01:01,HLA-DRA*01:02+HLA-DRB3*01:01,human,II,HLA-DRA*01:02,HLA-DRB3*01:01,Explicit deposited HLA-DR chain pair; no beta-only shorthand remapping
+HLA-DRA*01:02/HLA-DRB3*02:02,HLA-DRA*01:02+HLA-DRB3*02:02,human,II,HLA-DRA*01:02,HLA-DRB3*02:02,Explicit deposited HLA-DR chain pair; no beta-only shorthand remapping

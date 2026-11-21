@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import re
 from collections import Counter, defaultdict
@@ -29,9 +30,13 @@ from .models import (
 from .fallback import (
     IMPUTED_AF3_DEFINITION,
     IMPUTED_EVIDENCE,
+    MASKED_PARTIAL_EVIDENCE,
+    MASKED_PBR_REPRESENTATION,
     PSEUDO_SCAFFOLD_EVIDENCE,
     evidence_allowed,
     evidence_priority,
+    expand_positions,
+    fallback_pbr_representation,
     normalize_fallback_policy,
 )
 from .names import (
@@ -135,50 +140,172 @@ class MHCRegistry:
             self._load_pbr_sequences(pbr_path) if pbr_path.is_file() else ()
         )
         self._pairs = self._load_pairs(data_root.joinpath("molecule_pairs.csv"))
+        exact_full_path = data_root.joinpath("exact_recovery_full_sequences.csv")
+        exact_af3_path = data_root.joinpath("exact_recovery_af3_sequences.csv")
+        exact_fallback_af3_path = data_root.joinpath(
+            "exact_recovery_fallback_af3_sequences.csv"
+        )
+        exact_pbr_path = data_root.joinpath("exact_recovery_pbr_sequences.csv")
+        exact_pseudo_path = data_root.joinpath("exact_recovery_pseudo_sequences.csv")
+        exact_pair_path = data_root.joinpath("exact_recovery_molecule_pairs.csv")
+        exact_projection_path = data_root.joinpath(
+            "exact_recovery_pseudo_pbr_projection.csv"
+        )
+        historical_alias_path = data_root.joinpath("historical_name_aliases.csv")
+        self._exact_recovery_sequences = (
+            self._load_sequences(exact_full_path) if exact_full_path.is_file() else ()
+        )
+        self._exact_recovery_af3_sequences = (
+            self._load_af3_sequences(exact_af3_path) if exact_af3_path.is_file() else ()
+        )
+        self._exact_recovery_fallback_af3_sequences = (
+            self._load_fallback_sequences(exact_fallback_af3_path, af3=True)
+            if exact_fallback_af3_path.is_file()
+            else ()
+        )
+        self._exact_recovery_pbr_sequences = (
+            self._load_pbr_sequences(exact_pbr_path) if exact_pbr_path.is_file() else ()
+        )
+        self._exact_recovery_pseudos = (
+            self._load_pseudos(exact_pseudo_path) if exact_pseudo_path.is_file() else ()
+        )
+        self._exact_recovery_pairs = (
+            self._load_pairs(exact_pair_path) if exact_pair_path.is_file() else ()
+        )
+        self._exact_recovery_pseudo_pbr_projections = (
+            self._load_pairs(exact_projection_path)
+            if exact_projection_path.is_file()
+            else ()
+        )
+        self._historical_name_aliases = (
+            self._load_pairs(historical_alias_path)
+            if historical_alias_path.is_file()
+            else ()
+        )
         fallback_full_path = data_root.joinpath("fallback_full_sequences.csv")
         fallback_af3_path = data_root.joinpath("fallback_af3_sequences.csv")
         fallback_pbr_path = data_root.joinpath("fallback_pbr_sequences.csv")
-        self._fallback_sequences = (
+        expression_full_path = data_root.joinpath(
+            "expression_qualified_fallback_full_overrides.csv"
+        )
+        expression_af3_path = data_root.joinpath(
+            "expression_qualified_fallback_af3_overrides.csv"
+        )
+        expression_pbr_path = data_root.joinpath(
+            "expression_qualified_fallback_pbr_overrides.csv"
+        )
+        masked_pbr_path = data_root.joinpath("masked_partial_pbr_sequences.csv")
+        fallback_sequences = (
             self._load_fallback_sequences(fallback_full_path, af3=False)
             if fallback_full_path.is_file()
             else ()
         )
-        self._fallback_af3_sequences = (
+        expression_full_overrides = (
+            self._load_fallback_sequences(expression_full_path, af3=False)
+            if expression_full_path.is_file()
+            else ()
+        )
+        self._fallback_sequences = self._apply_candidate_replacements(
+            fallback_sequences,
+            expression_full_overrides,
+            expression_full_path,
+            label="fallback full",
+        )
+        fallback_af3_sequences = (
             self._load_fallback_sequences(fallback_af3_path, af3=True)
             if fallback_af3_path.is_file()
             else ()
         )
-        self._fallback_pbr_sequences = (
+        expression_af3_overrides = (
+            self._load_fallback_sequences(expression_af3_path, af3=True)
+            if expression_af3_path.is_file()
+            else ()
+        )
+        self._fallback_af3_sequences = self._apply_candidate_replacements(
+            fallback_af3_sequences,
+            expression_af3_overrides,
+            expression_af3_path,
+            label="fallback AF3",
+        )
+        fallback_pbr_sequences = (
             self._load_fallback_pbr_sequences(fallback_pbr_path)
             if fallback_pbr_path.is_file()
             else ()
         )
+        expression_pbr_overrides = (
+            self._load_fallback_pbr_sequences(expression_pbr_path)
+            if expression_pbr_path.is_file()
+            else ()
+        )
+        fallback_pbr_sequences = self._apply_candidate_replacements(
+            fallback_pbr_sequences,
+            expression_pbr_overrides,
+            expression_pbr_path,
+            label="fallback PBR",
+        )
+        masked_pbr_sequences = (
+            self._load_fallback_pbr_sequences(masked_pbr_path)
+            if masked_pbr_path.is_file()
+            else ()
+        )
+        duplicate_pbr_ids = {
+            candidate.record_id for candidate in fallback_pbr_sequences
+        } & {candidate.record_id for candidate in masked_pbr_sequences}
+        if duplicate_pbr_ids:
+            raise MHCTransformError(
+                "masked partial PBR records must have distinct record IDs: "
+                + ", ".join(sorted(duplicate_pbr_ids))
+            )
+        self._validate_masked_partial_pbr_sequences(
+            masked_pbr_sequences,
+            fallback_pbr_sequences,
+            (*self._sequences, *self._exact_recovery_sequences),
+            (
+                *self._fallback_af3_sequences,
+                *self._exact_recovery_fallback_af3_sequences,
+            ),
+        )
+        self._fallback_pbr_sequences = (
+            *fallback_pbr_sequences,
+            *masked_pbr_sequences,
+        )
         pseudo_pbr_projection_path = data_root.joinpath("pseudo_pbr_projection.csv")
-        self._pseudo_pbr_projections = (
+        pseudo_pbr_projections = (
             self._load_pairs(pseudo_pbr_projection_path)
             if pseudo_pbr_projection_path.is_file()
             else ()
+        )
+        masked_projection_path = data_root.joinpath(
+            "masked_partial_pbr_projections.csv"
+        )
+        masked_projection_overrides = (
+            self._load_pairs(masked_projection_path)
+            if masked_projection_path.is_file()
+            else ()
+        )
+        self._pseudo_pbr_projections = self._apply_projection_overrides(
+            pseudo_pbr_projections, masked_projection_overrides
         )
         with data_root.joinpath("metadata.json").open("r", encoding="utf-8") as handle:
             self.metadata: Mapping[str, object] = json.load(handle)
 
         self._sequence_name_index: DefaultDict[str, List[SequenceCandidate]] = defaultdict(list)
         self._sequence_value_index: DefaultDict[str, List[SequenceCandidate]] = defaultdict(list)
-        for candidate in self._sequences:
+        for candidate in (*self._sequences, *self._exact_recovery_sequences):
             for name in _index_names(candidate.allele, candidate.aliases):
                 self._sequence_name_index[exact_name_key(name)].append(candidate)
             self._sequence_value_index[candidate.sequence].append(candidate)
 
         self._af3_name_index: DefaultDict[str, List[AF3SequenceCandidate]] = defaultdict(list)
         self._af3_value_index: DefaultDict[str, List[AF3SequenceCandidate]] = defaultdict(list)
-        for candidate in self._af3_sequences:
+        for candidate in (*self._af3_sequences, *self._exact_recovery_af3_sequences):
             for name in _index_names(candidate.allele, candidate.aliases):
                 self._af3_name_index[exact_name_key(name)].append(candidate)
             self._af3_value_index[candidate.sequence].append(candidate)
 
         self._pbr_name_index: DefaultDict[str, List[PBRSequenceCandidate]] = defaultdict(list)
         self._pbr_value_index: DefaultDict[str, List[PBRSequenceCandidate]] = defaultdict(list)
-        for candidate in self._pbr_sequences:
+        for candidate in (*self._pbr_sequences, *self._exact_recovery_pbr_sequences):
             for name in _index_names(candidate.allele, candidate.aliases):
                 self._pbr_name_index[exact_name_key(name)].append(candidate)
             self._pbr_value_index[candidate.sequence].append(candidate)
@@ -192,13 +319,13 @@ class MHCRegistry:
 
         self._pseudo_name_index: DefaultDict[str, List[PseudoCandidate]] = defaultdict(list)
         self._pseudo_value_index: DefaultDict[str, List[PseudoCandidate]] = defaultdict(list)
-        for candidate in self._pseudos:
+        for candidate in (*self._pseudos, *self._exact_recovery_pseudos):
             for name in _index_names(candidate.canonical_name, candidate.aliases):
                 self._pseudo_name_index[exact_name_key(name)].append(candidate)
             self._pseudo_value_index[candidate.pseudo_sequence].append(candidate)
 
         self._pair_index: DefaultDict[str, List[Mapping[str, str]]] = defaultdict(list)
-        for pair in self._pairs:
+        for pair in (*self._pairs, *self._exact_recovery_pairs):
             for name in (pair["canonical_name"], *_split_aliases(pair["aliases"])):
                 self._pair_index[exact_name_key(name)].append(pair)
 
@@ -219,7 +346,10 @@ class MHCRegistry:
         self._fallback_af3_value_index: DefaultDict[
             str, List[FallbackAF3SequenceCandidate]
         ] = defaultdict(list)
-        for candidate in self._fallback_af3_sequences:
+        for candidate in (
+            *self._fallback_af3_sequences,
+            *self._exact_recovery_fallback_af3_sequences,
+        ):
             for name in _index_names(candidate.allele, candidate.aliases):
                 self._fallback_af3_name_index[exact_name_key(name)].append(candidate)
             self._fallback_af3_value_index[candidate.sequence].append(candidate)
@@ -237,6 +367,12 @@ class MHCRegistry:
 
         if self._pseudo_pbr_projections:
             self._validate_pseudo_pbr_projections()
+        if (
+            self._exact_recovery_sequences
+            or self._exact_recovery_pseudos
+            or self._exact_recovery_pbr_sequences
+        ):
+            self._validate_exact_recoveries()
 
         # The projection table is a build-time certificate, not another
         # sequence source.  It records the one strict or fallback PBR record
@@ -248,7 +384,11 @@ class MHCRegistry:
             str, List[Mapping[str, str]]
         ] = defaultdict(list)
         projection_by_allele: DefaultDict[str, List[Mapping[str, str]]] = defaultdict(list)
-        for projection in self._pseudo_pbr_projections:
+        runtime_projections = self._merge_targeted_exact_projections(
+            self._pseudo_pbr_projections,
+            self._exact_recovery_pseudo_pbr_projections,
+        )
+        for projection in runtime_projections:
             projection_by_allele[exact_name_key(projection["allele"])].append(projection)
             for name in _index_names(projection["allele"], ()):
                 self._pseudo_pbr_projection_name_index[exact_name_key(name)].append(
@@ -258,12 +398,367 @@ class MHCRegistry:
         # Preserve explicit historical/legacy aliases for MHC-I pseudo names.
         # MHC-II projection queries are component queries and are indexed by
         # alpha_allele/beta_allele directly above.
-        for pseudo in self._pseudos:
+        for pseudo in (*self._pseudos, *self._exact_recovery_pseudos):
             if pseudo.mhc_class != "I":
                 continue
             rows = projection_by_allele.get(exact_name_key(pseudo.canonical_name), ())
             for alias in _index_names(pseudo.canonical_name, pseudo.aliases):
                 self._pseudo_pbr_projection_name_index[exact_name_key(alias)].extend(rows)
+
+        self._apply_historical_name_aliases()
+
+    @staticmethod
+    def _merge_targeted_exact_projections(
+        base_rows: Sequence[Mapping[str, str]],
+        exact_rows: Sequence[Mapping[str, str]],
+    ) -> Tuple[Mapping[str, str], ...]:
+        """Prefer a targeted strict certificate for the same component."""
+
+        def key(row: Mapping[str, str]) -> Tuple[str, str, str, str]:
+            return (
+                row["species"],
+                row["mhc_class"],
+                row["chain_role"],
+                exact_name_key(row["allele"]),
+            )
+
+        indexed = {key(row): row for row in base_rows}
+        if len(indexed) != len(base_rows):
+            raise MHCTransformError("duplicate base pseudo/PBR projection component")
+        seen_exact = set()
+        for row in exact_rows:
+            row_key = key(row)
+            if row_key in seen_exact:
+                raise MHCTransformError(
+                    f"duplicate targeted exact projection component: {row['allele']}"
+                )
+            seen_exact.add(row_key)
+            indexed[row_key] = row
+        return tuple(indexed[row_key] for row_key in sorted(indexed))
+
+    def _apply_historical_name_aliases(self) -> None:
+        """Index only a documented current equivalent of a retired name."""
+
+        self._historical_alias_index: DefaultDict[
+            str, List[Mapping[str, str]]
+        ] = defaultdict(list)
+        for row in self._historical_name_aliases:
+            historical_key = exact_name_key(row["historical_name"])
+            current_key = exact_name_key(row["current_name"])
+            self._historical_alias_index[historical_key].append(row)
+            for index in (
+                self._sequence_name_index,
+                self._af3_name_index,
+                self._pbr_name_index,
+            ):
+                index[historical_key].extend(index.get(current_key, ()))
+
+            current_pseudo = two_field_hla(row["current_name"]) or row["current_name"]
+            current_pseudo_key = exact_name_key(current_pseudo)
+            self._pseudo_name_index[historical_key].extend(
+                self._pseudo_name_index.get(current_pseudo_key, ())
+            )
+            self._pseudo_pbr_projection_name_index[historical_key].extend(
+                self._pseudo_pbr_projection_name_index.get(current_pseudo_key, ())
+            )
+
+    def _historical_alias_note(self, query: str, *, pseudo: bool = False) -> str | None:
+        rows = self._historical_alias_index.get(exact_name_key(query), ())
+        if not rows:
+            return None
+        current = ", ".join(sorted({row["current_name"] for row in rows}))
+        note = (
+            f"{query} is a retired IPD-IMGT/HLA name documented as sequence-identical "
+            f"to {current}; the returned record uses the current sequence identity."
+        )
+        if pseudo:
+            note += (
+                " Any official DTU support belongs to the current two-field allele, "
+                "not to the retired spelling."
+            )
+        return note
+
+    def _validate_exact_recoveries(self) -> None:
+        """Validate the small hand-audited recovery sidecars at load time."""
+
+        def fail(detail: str) -> None:
+            raise MHCTransformError(f"invalid targeted exact MHC recovery: {detail}")
+
+        def ensure_distinct(base: Sequence[object], exact: Sequence[object], label: str) -> None:
+            base_ids = {getattr(candidate, "record_id") for candidate in base}
+            exact_ids = [getattr(candidate, "record_id") for candidate in exact]
+            if len(set(exact_ids)) != len(exact_ids) or base_ids & set(exact_ids):
+                fail(f"duplicate {label} record ID")
+
+        ensure_distinct(self._sequences, self._exact_recovery_sequences, "full")
+        ensure_distinct(self._af3_sequences, self._exact_recovery_af3_sequences, "AF3")
+        ensure_distinct(self._pbr_sequences, self._exact_recovery_pbr_sequences, "PBR")
+        ensure_distinct(self._pseudos, self._exact_recovery_pseudos, "pseudo")
+
+        full_by_id = {
+            candidate.record_id: candidate
+            for candidate in (*self._sequences, *self._exact_recovery_sequences)
+        }
+        for candidate in self._exact_recovery_sequences:
+            if normalize_sequence(candidate.sequence) != candidate.sequence:
+                fail(f"invalid deposited sequence for {candidate.allele}")
+            if not candidate.source_accession:
+                fail(f"missing source accession for {candidate.allele}")
+
+        af3_by_id = {
+            candidate.record_id: candidate
+            for candidate in (*self._af3_sequences, *self._exact_recovery_af3_sequences)
+        }
+        for candidate in self._exact_recovery_af3_sequences:
+            parent = full_by_id.get(candidate.source_full_record_id)
+            if parent is None:
+                fail(f"missing AF3 parent for {candidate.allele}")
+            projected = parent.sequence[
+                candidate.precursor_start_1based - 1 : candidate.precursor_end_1based
+            ]
+            if projected != candidate.sequence:
+                fail(f"AF3 crop changed for {candidate.allele}")
+
+        exact_fallback_af3_by_id = {
+            candidate.record_id: candidate
+            for candidate in self._exact_recovery_fallback_af3_sequences
+        }
+        for candidate in self._exact_recovery_fallback_af3_sequences:
+            if (
+                candidate.evidence_level != "source_exact_ectodomain"
+                or candidate.imputed_residue_count
+                or candidate.observed_residue_count != len(candidate.sequence)
+            ):
+                fail(f"non-exact AF3 fallback in recovery sidecar: {candidate.allele}")
+            parents = [
+                full_by_id[record_id]
+                for record_id in candidate.source_record_ids
+                if record_id in full_by_id
+            ]
+            if not parents or not any(candidate.sequence in parent.sequence for parent in parents):
+                fail(f"AF3 fallback is not deposited verbatim for {candidate.allele}")
+
+        strict_pbr_by_id = {
+            candidate.record_id: candidate
+            for candidate in (*self._pbr_sequences, *self._exact_recovery_pbr_sequences)
+        }
+        pbr_by_id = {
+            **strict_pbr_by_id,
+            **{
+                candidate.record_id: candidate
+                for candidate in self._fallback_pbr_sequences
+            },
+        }
+        coordinate_af3_by_id = {**af3_by_id, **exact_fallback_af3_by_id}
+        for candidate in self._exact_recovery_pbr_sequences:
+            parent = full_by_id.get(candidate.source_full_record_id)
+            if parent is None:
+                fail(f"missing PBR full parent for {candidate.allele}")
+            precursor_crop = parent.sequence[
+                candidate.precursor_start_1based - 1 : candidate.precursor_end_1based
+            ]
+            if precursor_crop != candidate.sequence or "X" in candidate.sequence:
+                fail(f"PBR precursor crop changed for {candidate.allele}")
+            if candidate.source_af3_record_id:
+                af3_parent = coordinate_af3_by_id.get(candidate.source_af3_record_id)
+                if af3_parent is None:
+                    fail(f"missing PBR AF3 parent for {candidate.allele}")
+                af3_crop = af3_parent.sequence[
+                    candidate.af3_start_1based - 1 : candidate.af3_end_1based
+                ]
+                if af3_crop != candidate.sequence:
+                    fail(f"PBR AF3 crop changed for {candidate.allele}")
+
+        all_pseudos = (*self._pseudos, *self._exact_recovery_pseudos)
+        component_pseudos: DefaultDict[
+            Tuple[str, str, str, str], List[Tuple[PseudoCandidate, str, int]]
+        ] = defaultdict(list)
+        for pseudo in all_pseudos:
+            if pseudo.mhc_class == "I":
+                components = (("heavy", pseudo.canonical_name, pseudo.pseudo_sequence, 1),)
+            else:
+                components = (
+                    ("alpha", pseudo.alpha_allele, pseudo.pseudo_sequence[:15], 1),
+                    ("beta", pseudo.beta_allele, pseudo.pseudo_sequence[15:], 16),
+                )
+            for role, allele, segment, start in components:
+                component_pseudos[
+                    (pseudo.species, pseudo.mhc_class, role, exact_name_key(allele))
+                ].append((pseudo, segment, start))
+
+        for pseudo in self._exact_recovery_pseudos:
+            allowed_provenance = {
+                ("derived_exact_pbr", "derived_from_exact_pbr"),
+                (
+                    "derived_contact_complete_partial",
+                    "derived_from_contact_complete_partial",
+                ),
+            }
+            if (
+                len(pseudo.pseudo_sequence) != 34
+                or "X" in pseudo.pseudo_sequence
+                or (pseudo.evidence_level, pseudo.validation_status)
+                not in allowed_provenance
+                or pseudo.official_support
+            ):
+                fail(f"pseudo provenance changed for {pseudo.canonical_name}")
+            if not pseudo.source_record_ids or any(
+                record_id not in pbr_by_id for record_id in pseudo.source_record_ids
+            ):
+                fail(f"pseudo source PBR missing for {pseudo.canonical_name}")
+            source_pbrs = [pbr_by_id[record_id] for record_id in pseudo.source_record_ids]
+            uses_masked_partial = any(
+                isinstance(candidate, FallbackPBRSequenceCandidate)
+                and candidate.evidence_level == MASKED_PARTIAL_EVIDENCE
+                for candidate in source_pbrs
+            )
+            if (
+                pseudo.evidence_level == "derived_exact_pbr"
+                and uses_masked_partial
+            ) or (
+                pseudo.evidence_level == "derived_contact_complete_partial"
+                and not uses_masked_partial
+            ):
+                fail(f"pseudo evidence/source mismatch for {pseudo.canonical_name}")
+
+        self._validate_exact_projection_rows(component_pseudos, pbr_by_id, fail)
+        self._validate_exact_pairs_and_aliases(fail)
+
+    def _validate_exact_projection_rows(
+        self,
+        component_pseudos: Mapping[
+            Tuple[str, str, str, str], Sequence[Tuple[PseudoCandidate, str, int]]
+        ],
+        pbr_by_id: Mapping[str, object],
+        fail,
+    ) -> None:
+        seen = set()
+        for row in self._exact_recovery_pseudo_pbr_projections:
+            key = (
+                row["species"],
+                row["mhc_class"],
+                row["chain_role"],
+                exact_name_key(row["allele"]),
+            )
+            if key in seen:
+                fail(f"duplicate projection for {row['allele']}")
+            seen.add(key)
+            pbr = pbr_by_id.get(row["pbr_record_id"])
+            if pbr is None:
+                fail(f"projection PBR missing for {row['allele']}")
+            if row["pbr_source"] == "strict":
+                if not isinstance(pbr, PBRSequenceCandidate):
+                    fail(f"strict projection points to fallback PBR for {row['allele']}")
+            elif row["pbr_source"] == "fallback":
+                if not (
+                    isinstance(pbr, FallbackPBRSequenceCandidate)
+                    and pbr.evidence_level == MASKED_PARTIAL_EVIDENCE
+                ):
+                    fail(f"exact-contact fallback is not partial-masked for {row['allele']}")
+            else:
+                fail(f"invalid exact projection source for {row['allele']}")
+            try:
+                coordinates = tuple(
+                    int(value) for value in row["contact_positions_1based"].split(";")
+                )
+                offsets = tuple(
+                    int(value) for value in row["coordinate_offsets"].split(";")
+                )
+            except ValueError:
+                fail(f"invalid projection coordinates for {row['allele']}")
+                return
+            if (
+                not coordinates
+                or len(coordinates) != len(row["pseudo_segment"])
+                or len(offsets) != len(coordinates)
+                or tuple(sorted(set(coordinates))) != coordinates
+                or coordinates[-1] > len(pbr.sequence)
+            ):
+                fail(f"incomplete projection coordinates for {row['allele']}")
+            projected = "".join(pbr.sequence[position - 1] for position in coordinates)
+            if (
+                projected != row["pseudo_segment"]
+                or projected != row["projected_segment"]
+                or "X" in projected
+                or row["coverage_status"] != "exact"
+            ):
+                fail(f"projection residues changed for {row['allele']}")
+            matching_ids = {
+                pseudo.record_id
+                for pseudo, segment, start in component_pseudos.get(key, ())
+                if segment == row["pseudo_segment"]
+                and start == int(row["pseudo_start_1based"])
+            }
+            if (
+                int(row["pseudo_record_count"]) != len(matching_ids)
+                or row["representative_pseudo_record_id"] not in matching_ids
+            ):
+                fail(f"projection pseudo usage changed for {row['allele']}")
+
+        runtime = self._merge_targeted_exact_projections(
+            self._pseudo_pbr_projections,
+            self._exact_recovery_pseudo_pbr_projections,
+        )
+        by_component = {
+            (
+                row["species"],
+                row["mhc_class"],
+                row["chain_role"],
+                exact_name_key(row["allele"]),
+            ): row
+            for row in runtime
+        }
+        for pseudo in self._exact_recovery_pseudos:
+            components = (
+                (("heavy", pseudo.canonical_name, pseudo.pseudo_sequence),)
+                if pseudo.mhc_class == "I"
+                else (
+                    ("alpha", pseudo.alpha_allele, pseudo.pseudo_sequence[:15]),
+                    ("beta", pseudo.beta_allele, pseudo.pseudo_sequence[15:]),
+                )
+            )
+            for role, allele, segment in components:
+                row = by_component.get(
+                    (pseudo.species, pseudo.mhc_class, role, exact_name_key(allele))
+                )
+                if row is None or row["pseudo_segment"] != segment:
+                    fail(f"pseudo component lacks exact certificate: {allele}")
+
+    def _validate_exact_pairs_and_aliases(self, fail) -> None:
+        pseudo_by_name = {
+            exact_name_key(pseudo.canonical_name): pseudo
+            for pseudo in self._exact_recovery_pseudos
+        }
+        for pair in self._exact_recovery_pairs:
+            pseudo = pseudo_by_name.get(exact_name_key(pair["canonical_name"]))
+            if (
+                pseudo is None
+                or pseudo.alpha_allele != pair["alpha_or_heavy"]
+                or pseudo.beta_allele != pair["beta_or_companion"]
+            ):
+                fail(f"pair/pseudo mismatch for {pair['canonical_name']}")
+
+        seen = set()
+        sequence_collections = (
+            (*self._sequences, *self._exact_recovery_sequences),
+            (*self._af3_sequences, *self._exact_recovery_af3_sequences),
+            (*self._pbr_sequences, *self._exact_recovery_pbr_sequences),
+        )
+        for row in self._historical_name_aliases:
+            historical_key = exact_name_key(row["historical_name"])
+            if historical_key in seen:
+                fail(f"duplicate historical alias {row['historical_name']}")
+            seen.add(historical_key)
+            if row["relationship"] != "sequence_identical_deleted_name":
+                fail(f"unsupported historical relationship for {row['historical_name']}")
+            current_key = exact_name_key(row["current_name"])
+            for collection in sequence_collections:
+                if not any(
+                    current_key
+                    in {exact_name_key(name) for name in (candidate.allele, *candidate.aliases)}
+                    for candidate in collection
+                ):
+                    fail(f"historical current sequence is absent: {row['current_name']}")
 
     def _validate_pseudo_pbr_projections(self) -> None:
         """Reject stale or internally inconsistent pseudo/PBR certificates.
@@ -589,6 +1084,103 @@ class MHCRegistry:
             return tuple(dict(row) for row in csv.DictReader(handle))
 
     @staticmethod
+    def _apply_candidate_replacements(
+        base: Sequence[object],
+        replacements: Sequence[object],
+        replacement_path: object,
+        *,
+        label: str,
+    ) -> Tuple[object, ...]:
+        """Replace records by explicit old ID without retaining duplicates."""
+
+        if not replacements:
+            return tuple(base)
+        with replacement_path.open("r", encoding="utf-8", newline="") as handle:
+            rows = list(csv.DictReader(handle))
+        if len(rows) != len(replacements):
+            raise MHCTransformError(f"{label} replacement row count changed while loading")
+
+        indexed = {getattr(candidate, "record_id"): candidate for candidate in base}
+        if len(indexed) != len(base):
+            raise MHCTransformError(f"duplicate record IDs in {label} registry")
+        for row, replacement in zip(rows, replacements):
+            old_id = row.get("replaces_record_id", "").strip()
+            new_id = getattr(replacement, "record_id")
+            if not old_id or old_id == new_id:
+                raise MHCTransformError(
+                    f"{label} replacement must name a distinct old record ID: {new_id}"
+                )
+            if old_id not in indexed:
+                if new_id in indexed:
+                    continue
+                raise MHCTransformError(
+                    f"{label} replacement target is absent: {old_id}"
+                )
+            if new_id in indexed:
+                raise MHCTransformError(
+                    f"{label} replacement ID collides with an existing record: {new_id}"
+                )
+            indexed.pop(old_id)
+            indexed[new_id] = replacement
+        return tuple(indexed[record_id] for record_id in sorted(indexed))
+
+    @staticmethod
+    def _apply_projection_overrides(
+        base_rows: Sequence[Mapping[str, str]],
+        override_rows: Sequence[Mapping[str, str]],
+    ) -> Tuple[Mapping[str, str], ...]:
+        """Apply a small, explicit component-level projection correction set.
+
+        The main projection table remains the reproducible generated artifact.
+        A targeted masked-PBR repair replaces only named components and cannot
+        add an unrelated component silently. ``replaces_allele`` is needed
+        only when a nomenclature correction changes the component key.
+        """
+
+        def key(row: Mapping[str, str], allele: str | None = None) -> Tuple[str, ...]:
+            return (
+                row["species"],
+                row["mhc_class"],
+                row["chain_role"],
+                exact_name_key(allele or row["allele"]),
+            )
+
+        indexed: Dict[Tuple[str, ...], Mapping[str, str]] = {}
+        for row in base_rows:
+            row_key = key(row)
+            if row_key in indexed:
+                raise MHCTransformError(
+                    f"duplicate pseudo/PBR projection component: {row['allele']}"
+                )
+            indexed[row_key] = row
+
+        for override in override_rows:
+            own_key = key(override)
+            replacement_name = override.get("replaces_allele", "").strip()
+            replacement_key = key(override, replacement_name) if replacement_name else own_key
+            target_key = (
+                replacement_key
+                if replacement_key in indexed
+                else own_key if own_key in indexed else None
+            )
+            if target_key is None:
+                raise MHCTransformError(
+                    "masked PBR projection override has no generated component to replace: "
+                    + override["allele"]
+                )
+            if own_key != target_key and own_key in indexed:
+                raise MHCTransformError(
+                    "masked PBR projection override collides with an existing component: "
+                    + override["allele"]
+                )
+            indexed.pop(target_key)
+            cleaned = dict(override)
+            cleaned.pop("replaces_allele", None)
+            indexed[own_key] = cleaned
+
+        return tuple(indexed[row_key] for row_key in sorted(indexed))
+
+    @staticmethod
     def _load_fallback_sequences(
         path: object, *, af3: bool
     ) -> Tuple[FallbackSequenceCandidate | FallbackAF3SequenceCandidate, ...]:
@@ -647,6 +1239,54 @@ class MHCRegistry:
                     raise MHCTransformError(
                         f"invalid fallback PBR span: {row['af3_span_1based']}"
                     )
+                sequence = normalize_sequence(row["sequence"], allow_x=True)
+                observed = set(expand_positions(row["observed_spans_1based"]))
+                unknown_spans = row.get("unknown_spans_1based") or ""
+                unknown = set(expand_positions(unknown_spans))
+                imputed = set(expand_positions(row["imputed_spans_1based"]))
+                expected_positions = set(range(1, len(sequence) + 1))
+                if (observed & unknown) or (observed & imputed) or (unknown & imputed):
+                    raise MHCTransformError(
+                        f"overlapping fallback PBR provenance spans: {row['record_id']}"
+                    )
+                if observed | unknown | imputed != expected_positions:
+                    raise MHCTransformError(
+                        f"incomplete fallback PBR provenance spans: {row['record_id']}"
+                    )
+                x_positions = {
+                    position
+                    for position, residue in enumerate(sequence, start=1)
+                    if residue == "X"
+                }
+                if x_positions != unknown:
+                    raise MHCTransformError(
+                        f"fallback PBR X residues do not match unknown spans: {row['record_id']}"
+                    )
+                observed_count = int(row["observed_residue_count"])
+                unknown_count = int(row.get("unknown_residue_count") or 0)
+                imputed_count = int(row["imputed_residue_count"])
+                if (observed_count, unknown_count, imputed_count) != (
+                    len(observed),
+                    len(unknown),
+                    len(imputed),
+                ):
+                    raise MHCTransformError(
+                        f"fallback PBR provenance counts disagree with spans: {row['record_id']}"
+                    )
+                evidence_level = row["evidence_level"]
+                sequence_representation = (
+                    row.get("sequence_representation")
+                    or fallback_pbr_representation(evidence_level)
+                )
+                if bool(unknown) != (evidence_level == MASKED_PARTIAL_EVIDENCE):
+                    raise MHCTransformError(
+                        f"fallback PBR unknown residues require {MASKED_PARTIAL_EVIDENCE}: "
+                        f"{row['record_id']}"
+                    )
+                if unknown and sequence_representation != MASKED_PBR_REPRESENTATION:
+                    raise MHCTransformError(
+                        f"masked fallback PBR has the wrong representation: {row['record_id']}"
+                    )
                 candidates.append(
                     FallbackPBRSequenceCandidate(
                         record_id=row["record_id"],
@@ -656,17 +1296,25 @@ class MHCRegistry:
                         mhc_class=row["mhc_class"],
                         chain_role=row["chain_role"],
                         locus=row["locus"],
-                        definition_id=row["representation"],
-                        sequence=row["sequence"],
+                        definition_id=(
+                            row.get("definition_id") or row.get("representation") or ""
+                        ),
+                        sequence_representation=sequence_representation,
+                        sequence=sequence,
                         source_af3_record_id=row["source_af3_record_id"],
                         af3_start_1based=int(af3_span.group(1)),
                         af3_end_1based=int(af3_span.group(2)),
-                        evidence_level=row["evidence_level"],
+                        evidence_level=evidence_level,
                         observed_spans_1based=row["observed_spans_1based"],
+                        unknown_spans_1based=unknown_spans,
                         imputed_spans_1based=row["imputed_spans_1based"],
-                        observed_residue_count=int(row["observed_residue_count"]),
-                        imputed_residue_count=int(row["imputed_residue_count"]),
+                        observed_residue_count=observed_count,
+                        unknown_residue_count=unknown_count,
+                        imputed_residue_count=imputed_count,
                         source_record_ids=_split_aliases(row["source_record_ids"]),
+                        masked_from_record_id=(
+                            row.get("masked_from_record_id") or ""
+                        ),
                         template_record_id=row["template_record_id"],
                         template_allele=row["template_allele"],
                         target_pseudo_record_id=row["target_pseudo_record_id"],
@@ -680,6 +1328,112 @@ class MHCRegistry:
                     )
                 )
         return tuple(candidates)
+
+    @staticmethod
+    def _validate_masked_partial_pbr_sequences(
+        masked: Sequence[FallbackPBRSequenceCandidate],
+        fallback_pbr: Sequence[FallbackPBRSequenceCandidate],
+        deposited: Sequence[SequenceCandidate],
+        fallback_af3: Sequence[FallbackAF3SequenceCandidate],
+    ) -> None:
+        """Validate masked residues without claiming an AF3-substring identity."""
+
+        pbr_by_id = {candidate.record_id: candidate for candidate in fallback_pbr}
+        deposited_by_id = {candidate.record_id: candidate for candidate in deposited}
+        af3_by_id = {candidate.record_id: candidate for candidate in fallback_af3}
+        for candidate in masked:
+            if candidate.evidence_level != MASKED_PARTIAL_EVIDENCE:
+                raise MHCTransformError(
+                    f"masked PBR sidecar contains non-masked evidence: {candidate.record_id}"
+                )
+            expected_record_id = hashlib.sha256(
+                "\x1f".join(
+                    (
+                        "masked-partial-pbr",
+                        candidate.definition_id,
+                        candidate.allele,
+                        candidate.sequence,
+                        ";".join(candidate.source_record_ids),
+                        candidate.unknown_spans_1based,
+                    )
+                ).encode("utf-8")
+            ).hexdigest()[:20]
+            if candidate.record_id != expected_record_id:
+                raise MHCTransformError(
+                    f"masked PBR record ID is not content-derived: {candidate.record_id}"
+                )
+            if candidate.masked_from_record_id:
+                parent = pbr_by_id.get(candidate.masked_from_record_id)
+                if parent is None or parent.record_id == candidate.record_id:
+                    raise MHCTransformError(
+                        f"masked PBR lacks a distinct related imputed record: {candidate.record_id}"
+                    )
+                if (
+                    parent.species,
+                    parent.mhc_class,
+                    parent.chain_role,
+                    parent.locus,
+                    parent.definition_id,
+                    len(parent.sequence),
+                ) != (
+                    candidate.species,
+                    candidate.mhc_class,
+                    candidate.chain_role,
+                    candidate.locus,
+                    candidate.definition_id,
+                    len(candidate.sequence),
+                ):
+                    raise MHCTransformError(
+                        f"masked/imputed PBR coordinate frames disagree: {candidate.record_id}"
+                    )
+            elif "no_imputed_counterpart" not in candidate.quality_flags:
+                raise MHCTransformError(
+                    "masked PBR without an imputed counterpart must say so explicitly: "
+                    + candidate.record_id
+                )
+
+            observed_sequence = "".join(
+                candidate.sequence[position - 1]
+                for position in expand_positions(candidate.observed_spans_1based)
+            )
+            sources = [
+                deposited_by_id[record_id]
+                for record_id in candidate.source_record_ids
+                if record_id in deposited_by_id
+            ]
+            if not sources or not any(
+                source.species == candidate.species
+                and source.mhc_class == candidate.mhc_class
+                and source.chain_role == candidate.chain_role
+                and source.locus == candidate.locus
+                and source.sequence.startswith(observed_sequence)
+                for source in sources
+            ):
+                raise MHCTransformError(
+                    "masked PBR non-X residues do not match the deposited source: "
+                    + candidate.record_id
+                )
+
+            if candidate.source_af3_record_id:
+                coordinate_source = af3_by_id.get(candidate.source_af3_record_id)
+                if coordinate_source is None or (
+                    coordinate_source.species,
+                    coordinate_source.mhc_class,
+                    coordinate_source.chain_role,
+                    coordinate_source.locus,
+                ) != (
+                    candidate.species,
+                    candidate.mhc_class,
+                    candidate.chain_role,
+                    candidate.locus,
+                ):
+                    raise MHCTransformError(
+                        f"masked PBR has an invalid AF3 coordinate source: {candidate.record_id}"
+                    )
+                if candidate.af3_end_1based > len(coordinate_source.sequence):
+                    raise MHCTransformError(
+                        f"masked PBR exceeds its AF3 coordinate frame: {candidate.record_id}"
+                    )
 
     @staticmethod
     def _filter_sequence_candidates(
@@ -839,6 +1593,9 @@ class MHCRegistry:
             )
         exact = self._sequence_name_index.get(exact_name_key(allele), ())
         notes: List[str] = []
+        historical_note = self._historical_alias_note(allele)
+        if historical_note:
+            notes.append(historical_note)
         projected = False
         fallback_key = exact_name_key(allele)
         candidates = self._filter_sequence_candidates(
@@ -1039,6 +1796,9 @@ class MHCRegistry:
             definition_id=definition_id,
         )
         notes: List[str] = []
+        historical_note = self._historical_alias_note(allele)
+        if historical_note:
+            notes.append(historical_note)
         projected = False
         deposited_full = self._sequence_name_index.get(query_key, ())
         exclusions = self._af3_exclusion_index.get(query_key, ())
@@ -1225,6 +1985,9 @@ class MHCRegistry:
             definition_id=definition_id,
         )
         notes: List[str] = []
+        historical_note = self._historical_alias_note(allele)
+        if historical_note:
+            notes.append(historical_note)
         projected = False
         deposited_full = self._sequence_name_index.get(query_key, ())
         exclusions = self._af3_exclusion_index.get(query_key, ())
@@ -1305,6 +2068,11 @@ class MHCRegistry:
                     "Pseudo-match contract: returned a certified strict PBR; every non-X pseudo residue matches its projected PBR coordinate exactly, while X remains an explicit wildcard."
                 )
             elif fallback_candidates:
+                masked = any(
+                    getattr(candidate, "evidence_level", "")
+                    == MASKED_PARTIAL_EVIDENCE
+                    for candidate in fallback_candidates
+                )
                 synthetic = any(
                     getattr(candidate, "evidence_level", "")
                     in {IMPUTED_EVIDENCE, PSEUDO_SCAFFOLD_EVIDENCE}
@@ -1316,6 +2084,10 @@ class MHCRegistry:
                 if synthetic:
                     notes.append(
                         "The certified PBR is a synthetic engineered construct constrained by the pseudo; unknown X residues were treated as wildcards and were not inserted into the protein chain."
+                    )
+                if masked:
+                    notes.append(
+                        "The certified partial PBR retains every deposited residue and encodes only genuinely unobserved positions as X; no template amino acid is asserted at those positions, and every pseudo contact is observed."
                     )
             else:
                 expression_blocked = False
@@ -1356,9 +2128,18 @@ class MHCRegistry:
                     if getattr(candidate, "definition_id") == definition_id
                 )
             if fallback_candidates:
-                notes.append(
-                    "Strict PBR unavailable; an explicitly labelled PBR fallback/construct was returned."
-                )
+                if all(
+                    getattr(candidate, "evidence_level", "")
+                    == MASKED_PARTIAL_EVIDENCE
+                    for candidate in fallback_candidates
+                ):
+                    notes.append(
+                        "Strict PBR unavailable; an explicitly labelled partial PBR was returned with genuinely unknown residues encoded as X rather than copied from a template."
+                    )
+                else:
+                    notes.append(
+                        "Strict PBR unavailable; an explicitly labelled PBR fallback/construct was returned."
+                    )
             elif not allow_expression_qualified:
                 unfiltered = self._filter_fallback_candidates(
                     self._fallback_pbr_name_index.get(fallback_key, ()),
@@ -1382,10 +2163,19 @@ class MHCRegistry:
             getattr(candidate, "evidence_level", "source_exact")
             for candidate in returned_candidates
         }
-        representations = {
+        definitions = {
             getattr(candidate, "definition_id") for candidate in returned_candidates
         }
+        sequence_representations = {
+            getattr(candidate, "sequence_representation", "")
+            for candidate in fallback_candidates
+            if getattr(candidate, "sequence_representation", "")
+        }
         if require_pseudo_match:
+            masked_contract = bool(
+                fallback_candidates
+                and MASKED_PARTIAL_EVIDENCE in evidence_levels
+            )
             synthetic_contract = bool(
                 fallback_candidates
                 and evidence_levels & {IMPUTED_EVIDENCE, PSEUDO_SCAFFOLD_EVIDENCE}
@@ -1394,20 +2184,28 @@ class MHCRegistry:
                 "pseudo_compatible_pbr"
                 if not returned_candidates
                 else (
-                    "pseudo_compatible_synthetic_pbr"
-                    if synthetic_contract
+                    "pseudo_compatible_partial_masked_pbr"
+                    if masked_contract
                     else (
-                        "pseudo_compatible_fallback_pbr"
-                        if fallback_candidates
-                        else "pseudo_compatible_strict_pbr"
+                        "pseudo_compatible_synthetic_pbr"
+                        if synthetic_contract
+                        else (
+                            "pseudo_compatible_fallback_pbr"
+                            if fallback_candidates
+                            else "pseudo_compatible_strict_pbr"
+                        )
                     )
                 )
             )
         else:
             representation = (
-                next(iter(representations))
-                if len(representations) == 1
-                else "mixed_peptide_binding_region"
+                next(iter(sequence_representations))
+                if len(sequence_representations) == 1
+                else (
+                    next(iter(definitions))
+                    if len(definitions) == 1
+                    else "mixed_peptide_binding_region"
+                )
             )
         return QueryResult(
             query=allele,
@@ -1416,7 +2214,13 @@ class MHCRegistry:
             candidates=returned_candidates,
             notes=tuple(notes),
             fallback_used=(
-                contract_policy
+                (
+                    "partial"
+                    if require_pseudo_match
+                    and fallback_candidates
+                    and MASKED_PARTIAL_EVIDENCE in evidence_levels
+                    else contract_policy
+                )
                 if require_pseudo_match and fallback_candidates
                 else (fallback_policy if fallback_candidates else "none")
             ),
@@ -1439,7 +2243,9 @@ class MHCRegistry:
         """Return strict exact and opt-in compatible names for a PBR chain."""
 
         fallback_policy = normalize_fallback_policy(include_fallback)
-        normalized = normalize_sequence(sequence)
+        normalized = normalize_sequence(
+            sequence, allow_x=fallback_policy != "none"
+        )
         candidates = self._filter_pbr_candidates(
             self._pbr_value_index.get(normalized, ()),
             mhc_class=mhc_class,
@@ -1465,6 +2271,11 @@ class MHCRegistry:
         returned_candidates = _deduplicate((*candidates, *fallback_candidates))
         reverse_status = result_status(len(returned_candidates))
         notes: Tuple[str, ...] = ()
+        masked_fallback = any(
+            getattr(candidate, "evidence_level", "")
+            == MASKED_PARTIAL_EVIDENCE
+            for candidate in fallback_candidates
+        )
         if fallback_candidates:
             reverse_status = (
                 "compatible_unique"
@@ -1472,7 +2283,11 @@ class MHCRegistry:
                 else "compatible_ambiguous"
             )
             notes = (
-                "Sequence matches an engineered/partial PBR fallback construct; this is compatibility, not proof of an exact biological allele.",
+                (
+                    "X-containing sequence matches an explicit partial-masked PBR representation; known residues are compatible with the allele, but unknown positions prevent an exact biological sequence claim."
+                    if masked_fallback
+                    else "Sequence matches an engineered/partial PBR fallback construct; this is compatibility, not proof of an exact biological allele."
+                ),
             )
         evidence_levels = {
             getattr(candidate, "evidence_level", "source_exact")
@@ -1484,7 +2299,9 @@ class MHCRegistry:
         return QueryResult(
             query=normalized,
             representation=(
-                "fallback_pbr_construct_match"
+                "partial_masked_pbr_compatible_match"
+                if masked_fallback
+                else "fallback_pbr_construct_match"
                 if fallback_candidates
                 else (
                     next(iter(representations))
@@ -1523,6 +2340,9 @@ class MHCRegistry:
         query_key = exact_name_key(allele_or_pair)
         indexed = self._pseudo_name_index.get(query_key, ())
         notes: List[str] = []
+        historical_note = self._historical_alias_note(allele_or_pair, pseudo=True)
+        if historical_note:
+            notes.append(historical_note)
         projected = False
         if not indexed:
             components = [
@@ -2054,6 +2874,11 @@ class MHCRegistry:
             for molecule in candidates
             for chain in molecule.chains
         )
+        masked_returned = any(
+            getattr(chain, "evidence_level", "") == MASKED_PARTIAL_EVIDENCE
+            for molecule in candidates
+            for chain in molecule.chains
+        )
         synthetic_returned = any(
             getattr(chain, "evidence_level", "")
             in {IMPUTED_EVIDENCE, PSEUDO_SCAFFOLD_EVIDENCE}
@@ -2066,15 +2891,23 @@ class MHCRegistry:
             )
         if require_pseudo_match:
             representation = (
-                "pseudo_compatible_synthetic_pbr_molecule"
-                if synthetic_returned
-                else "pseudo_compatible_pbr_molecule"
+                "pseudo_compatible_partial_masked_pbr_molecule"
+                if masked_returned
+                else (
+                    "pseudo_compatible_synthetic_pbr_molecule"
+                    if synthetic_returned
+                    else "pseudo_compatible_pbr_molecule"
+                )
             )
         else:
             representation = (
-                "peptide_binding_region_fallback_molecule"
-                if fallback_returned
-                else "peptide_binding_region_molecule"
+                "peptide_binding_region_partial_masked_molecule"
+                if masked_returned
+                else (
+                    "peptide_binding_region_fallback_molecule"
+                    if fallback_returned
+                    else "peptide_binding_region_molecule"
+                )
             )
         return QueryResult(
             query=name,
@@ -2083,7 +2916,7 @@ class MHCRegistry:
             candidates=candidates,
             notes=tuple(dict.fromkeys(notes)),
             fallback_used=(
-                "pseudo-scaffold"
+                ("partial" if masked_returned else "pseudo-scaffold")
                 if require_pseudo_match and fallback_returned
                 else (fallback_policy if fallback_returned else "none")
             ),
@@ -2095,30 +2928,56 @@ class MHCRegistry:
         )
 
     def stats(self) -> Dict[str, object]:
+        all_sequences = (*self._sequences, *self._exact_recovery_sequences)
+        all_af3 = (*self._af3_sequences, *self._exact_recovery_af3_sequences)
+        all_pbr = (*self._pbr_sequences, *self._exact_recovery_pbr_sequences)
+        all_pseudos = (*self._pseudos, *self._exact_recovery_pseudos)
+        all_pairs = (*self._pairs, *self._exact_recovery_pairs)
+        all_fallback_af3 = (
+            *self._fallback_af3_sequences,
+            *self._exact_recovery_fallback_af3_sequences,
+        )
+        runtime_projections = self._merge_targeted_exact_projections(
+            self._pseudo_pbr_projections,
+            self._exact_recovery_pseudo_pbr_projections,
+        )
         return {
-            "sequence_records": len(self._sequences),
-            "complete_sequence_records": sum(item.is_complete for item in self._sequences),
-            "af3_sequence_records": len(self._af3_sequences),
-            "pbr_sequence_records": len(self._pbr_sequences),
-            "pseudo_pbr_projection_records": len(self._pseudo_pbr_projections),
-            "pseudo_records": len(self._pseudos),
+            "sequence_records": len(all_sequences),
+            "complete_sequence_records": sum(item.is_complete for item in all_sequences),
+            "af3_sequence_records": len(all_af3),
+            "pbr_sequence_records": len(all_pbr),
+            "pseudo_pbr_projection_records": len(runtime_projections),
+            "pseudo_records": len(all_pseudos),
             "pseudo_official_supported_records": sum(
-                item.official_support for item in self._pseudos
+                item.official_support for item in all_pseudos
             ),
             "pseudo_by_evidence": dict(
-                sorted(Counter(item.evidence_level for item in self._pseudos).items())
+                sorted(Counter(item.evidence_level for item in all_pseudos).items())
             ),
-            "pair_records": len(self._pairs),
+            "pair_records": len(all_pairs),
             "fallback_sequence_records": len(self._fallback_sequences),
-            "fallback_af3_records": len(self._fallback_af3_sequences),
+            "fallback_af3_records": len(all_fallback_af3),
             "fallback_pbr_records": len(self._fallback_pbr_sequences),
+            "masked_partial_pbr_records": sum(
+                item.evidence_level == MASKED_PARTIAL_EVIDENCE
+                for item in self._fallback_pbr_sequences
+            ),
+            "expression_qualified_fallback_replacements": sum(
+                item.allele == "HLA-A*30:14L"
+                and getattr(item, "evidence_level", "") == PSEUDO_SCAFFOLD_EVIDENCE
+                for item in (
+                    *self._fallback_sequences,
+                    *self._fallback_af3_sequences,
+                    *self._fallback_pbr_sequences,
+                )
+            ),
             "fallback_by_evidence": dict(
                 sorted(
                     Counter(
                         item.evidence_level
                         for item in (
                             *self._fallback_sequences,
-                            *self._fallback_af3_sequences,
+                            *all_fallback_af3,
                             *self._fallback_pbr_sequences,
                         )
                     ).items()

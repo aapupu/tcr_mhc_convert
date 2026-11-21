@@ -1,0 +1,2 @@
+historical_name,current_name,relationship,source,source_version,source_accession,note
+HLA-B*44:01,HLA-B*44:02:01:01,sequence_identical_deleted_name,IPD-IMGT/HLA Deleted_alleles.txt,IPD-IMGT/HLA 3.66.0 commit b2055ea,HLA00317,Retired name B*4401 was reported sequence-identical to B*44:02:01:01 in March 1994

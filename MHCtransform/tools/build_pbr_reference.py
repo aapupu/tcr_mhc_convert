@@ -535,12 +535,14 @@ def build_pseudo_pbr_projection_file(data_dir: Path) -> Mapping[str, object]:
     strict_rows = _read_csv(data_dir / "pbr_sequences.csv")
     fallback_path = data_dir / "fallback_pbr_sequences.csv"
     fallback_rows = _read_csv(fallback_path) if fallback_path.is_file() else []
+    masked_path = data_dir / "masked_partial_pbr_sequences.csv"
+    masked_rows = _read_csv(masked_path) if masked_path.is_file() else []
     with (data_dir / "metadata.json").open("r", encoding="utf-8") as handle:
         metadata = json.load(handle)
 
     references = _pbr_reference_sequences(strict_rows)
     strict_index = _name_index(strict_rows)
-    fallback_index = _name_index(fallback_rows)
+    fallback_index = _name_index((*fallback_rows, *masked_rows))
     targets: MutableMapping[Tuple[str, str, str, str], Dict[str, object]] = {}
     for pseudo in pseudo_rows:
         if pseudo["mhc_class"] == "I":
@@ -600,6 +602,16 @@ def build_pseudo_pbr_projection_file(data_dir: Path) -> Mapping[str, object]:
             and row["mhc_class"] == target["mhc_class"]
             and row["chain_role"] == target["chain_role"]
         ]
+        candidates.sort(
+            key=lambda item: (
+                0
+                if item[0] == "strict"
+                else 1
+                if item[1].get("evidence_level") == "source_partial_masked"
+                else 2,
+                item[1]["record_id"],
+            )
+        )
         selected = None
         errors = []
         for source, candidate in candidates:
@@ -802,14 +814,21 @@ def update_pbr_metadata(
 
 def build_pbr_files(data_dir: Path) -> Mapping[str, object]:
     strict_count = build_strict_pbr_file(data_dir)
-    fallback_count = build_fallback_pbr_file(data_dir)
+    generated_fallback_count = build_fallback_pbr_file(data_dir)
+    masked_path = data_dir / "masked_partial_pbr_sequences.csv"
+    masked_count = len(_read_csv(masked_path)) if masked_path.is_file() else 0
+    fallback_count = generated_fallback_count + masked_count
     projection_counts = build_pseudo_pbr_projection_file(data_dir)
     update_pbr_metadata(
-        data_dir, strict_count, fallback_count, projection_counts
+        data_dir,
+        strict_count,
+        fallback_count,
+        {**projection_counts, "masked_partial_pbr": masked_count},
     )
     return {
         "pbr_total": strict_count,
         "fallback_pbr": fallback_count,
+        "masked_partial_pbr": masked_count,
         **projection_counts,
     }
 

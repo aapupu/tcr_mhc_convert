@@ -63,6 +63,8 @@ mhctransform allele-to-pseudo 'HLA-A*02:01' \
 
 Use `full-to-allele`, `af3-to-allele`, `pbr-to-allele`, and `pseudo-to-allele` for reverse lookup. Strict sequences return all exact candidates. Fallback constructs are excluded unless explicitly requested, and then return `compatible_*` candidates rather than claiming a biological exact match. See the [`MHCtransform` documentation](MHCtransform/README.md) and [audit report](MHCtransform/AUDIT_REPORT.md) for definitions, coverage, limitations, and provenance.
 
+Rare-MHC recovery is accession-backed: exact records were added for the resolved targets, 18 partial PBRs preserve genuinely unknown residues as `X`, and `H-2-IEu` exposes an exact-contact pseudo plus mixed exact/masked PBR chains while deliberately withholding an incomplete beta chain from AF3 output.
+
 ### TCR V/J/CDR3 to AF3-ready alpha/beta extracellular chains
 
 Prepare a CSV containing at least `TRAV, TRAJ, CDR3A, TRBV, TRBJ, CDR3B`:

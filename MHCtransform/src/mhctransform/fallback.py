@@ -21,18 +21,33 @@ IMPUTED_PRECURSOR_DEFINITION = "precursor-imputed-v1"
 IMPUTED_AF3_DEFINITION = "af3-soluble-extracellular-imputed-v1"
 EXACT_ECTODOMAIN_EVIDENCE = "source_exact_ectodomain"
 PARTIAL_EVIDENCE = "source_partial"
+MASKED_PARTIAL_EVIDENCE = "source_partial_masked"
 IMPUTED_EVIDENCE = "partial_guided_imputed"
 PSEUDO_SCAFFOLD_EVIDENCE = "pseudo_only_scaffold"
 
+MASKED_PBR_REPRESENTATION = "pbr-partial-masked-v1"
+IMPUTED_PBR_REPRESENTATION = "pbr-imputed-v1"
+PSEUDO_SCAFFOLD_PBR_REPRESENTATION = "pbr-pseudo-scaffold-v1"
+SOURCE_PARTIAL_PBR_REPRESENTATION = "pbr-source-partial-v1"
+SOURCE_EXACT_PBR_REPRESENTATION = "pbr-source-exact-ectodomain-v1"
+
 POLICY_EVIDENCE = {
     "none": frozenset(),
-    "partial": frozenset({PARTIAL_EVIDENCE, EXACT_ECTODOMAIN_EVIDENCE}),
+    "partial": frozenset(
+        {PARTIAL_EVIDENCE, MASKED_PARTIAL_EVIDENCE, EXACT_ECTODOMAIN_EVIDENCE}
+    ),
     "imputed": frozenset(
-        {PARTIAL_EVIDENCE, EXACT_ECTODOMAIN_EVIDENCE, IMPUTED_EVIDENCE}
+        {
+            PARTIAL_EVIDENCE,
+            MASKED_PARTIAL_EVIDENCE,
+            EXACT_ECTODOMAIN_EVIDENCE,
+            IMPUTED_EVIDENCE,
+        }
     ),
     "pseudo-scaffold": frozenset(
         {
             PARTIAL_EVIDENCE,
+            MASKED_PARTIAL_EVIDENCE,
             EXACT_ECTODOMAIN_EVIDENCE,
             IMPUTED_EVIDENCE,
             PSEUDO_SCAFFOLD_EVIDENCE,
@@ -59,11 +74,16 @@ def evidence_priority(policy: str, evidence_level: str) -> int:
 
     policy = normalize_fallback_policy(policy)
     if policy == "partial":
-        order = (EXACT_ECTODOMAIN_EVIDENCE, PARTIAL_EVIDENCE)
+        order = (
+            EXACT_ECTODOMAIN_EVIDENCE,
+            MASKED_PARTIAL_EVIDENCE,
+            PARTIAL_EVIDENCE,
+        )
     elif policy in {"imputed", "pseudo-scaffold"}:
         order = (
             EXACT_ECTODOMAIN_EVIDENCE,
             IMPUTED_EVIDENCE,
+            MASKED_PARTIAL_EVIDENCE,
             PSEUDO_SCAFFOLD_EVIDENCE,
             PARTIAL_EVIDENCE,
         )
@@ -73,6 +93,18 @@ def evidence_priority(policy: str, evidence_level: str) -> int:
         return order.index(evidence_level)
     except ValueError:
         return 999
+
+
+def fallback_pbr_representation(evidence_level: str) -> str:
+    """Return an explicit sequence representation for a fallback PBR."""
+
+    return {
+        EXACT_ECTODOMAIN_EVIDENCE: SOURCE_EXACT_PBR_REPRESENTATION,
+        PARTIAL_EVIDENCE: SOURCE_PARTIAL_PBR_REPRESENTATION,
+        MASKED_PARTIAL_EVIDENCE: MASKED_PBR_REPRESENTATION,
+        IMPUTED_EVIDENCE: IMPUTED_PBR_REPRESENTATION,
+        PSEUDO_SCAFFOLD_EVIDENCE: PSEUDO_SCAFFOLD_PBR_REPRESENTATION,
+    }.get(evidence_level, "pbr-fallback-unspecified-v1")
 
 
 def hamming_distance(left: str, right: str) -> int:

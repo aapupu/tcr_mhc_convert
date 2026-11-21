@@ -1,4 +1,9 @@
 recursive-include src/mhctransform/data *.csv *.json
+include src/mhctransform/data/masked_partial_pbr_sequences.csv
+include src/mhctransform/data/masked_partial_pbr_projections.csv
+include src/mhctransform/data/expression_qualified_fallback_full_overrides.csv
+include src/mhctransform/data/expression_qualified_fallback_af3_overrides.csv
+include src/mhctransform/data/expression_qualified_fallback_pbr_overrides.csv
 include README.md
 include README.zh-CN.md
 include NOTICE.md

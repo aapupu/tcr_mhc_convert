@@ -24,6 +24,7 @@
 | `precursor_full` | 来源记录中的完整前体：signal + extracellular + TM + cytoplasmic | 序列核对、表达构建设计的起点；不是默认 AF3 链 |
 | `af3-soluble-extracellular-v1` | 去 signal/TM/cytoplasmic，保留全部胞外折叠域和膜近端连接肽 | AF3 pMHC–TCR 多链结构输入 |
 | `source-partial-v1` | 精确 deposited fragment，绝不重新标记为完整前体 | 证据恢复和片段检查 |
+| `pbr-partial-masked-v1` | 连续、显式开启的 PBR：保留全部 deposited 残基，并仅把确实未观测的位置编码为 `X` | 支持 MASK 的语言模型输入及 PBR/pseudo 比较；**不是** AF3 蛋白链 |
 | `precursor-imputed-v1` | 合成完整长度 scaffold：保留对齐到的 deposited 残基及目标 pseudo 的全部非 `X` 残基，其余来自同物种、同位点模板 | 显式开启的构建设计；不是官方等位基因序列 |
 | `af3-soluble-extracellular-imputed-v1` | 使用相同逐残基来源规则生成的 AF3 长度构建链 | 没有 exact 链时显式开启 AF3 初筛 |
 | `mhci-alpha1-alpha2-v1` | 连续 MHC-I alpha1+alpha2 肽结合槽，通常为 182 aa；不含 alpha3 与 B2M | 结构域比较及 34 个接触位点的可审计提取/核验 |
@@ -32,7 +33,7 @@
 | `netmhcpan-34-v1` | MHC-I 成熟重链参考对齐上的 34 个 peptide-contact 位点；不含 B2M | pan-allele 模型 descriptor，不是结构链 |
 | `netmhciipan-34-v1` | MHC-II α 链 15 位 + β 链 19 位，按参考对齐拼接；允许 `X` | pan-allele 模型 descriptor，不是结构链 |
 
-PBR 与 pseudo 相互配合但不能互换：PBR 是连续、可折叠的结构域并包含全部 pseudo 接触位点；34mer 是非连续模型 descriptor。构建过程执行硬性 pseudo-to-PBR 契约：34 个 pseudo 位点必须全部映射到 PBR，所有非 `X` 残基必须逐位完全一致；DTU 中的 `X` 只记录为 alignment/unknown 通配符，绝不会作为氨基酸写进 PBR 链。PBR 适合比较与 pseudo 核验，但 pMHC–TCR 的 AF3 默认仍使用完整胞外链，以保留膜近端结构域及天然界面。
+PBR 与 pseudo 相互配合但不能互换：strict PBR 是连续的生物学结构域序列并包含全部 pseudo 接触位点；34mer 是非连续模型 descriptor。构建过程执行硬性 pseudo-to-PBR 契约：34 个 pseudo 位点必须全部映射到 PBR，所有非 `X` pseudo 残基必须逐位完全一致；DTU pseudo 中的 `X` 仍是 alignment/unknown 通配符。另一个明确区分的 `pbr-partial-masked-v1` 可将未观测 PBR 位置编码为 `X`；这里的 `X` 是缺失数据/MASK 占位符，不是生物学氨基酸，也不声称等于模板残基。strict PBR 和全部 AF3-ready 链仍不含 `X`。PBR 适合比较与 pseudo 核验，但 pMHC–TCR 的 AF3 默认仍使用完整胞外链，以保留膜近端结构域及天然界面。
 
 位点坐标和来源哈希保存在 [`metadata.json`](src/mhctransform/data/metadata.json)。MHC-II pseudo 使用经过校准的参考对齐列，不能把统一 precursor 下标直接套到所有链。后备策略逐级累积且默认关闭：`none` → `partial` → `imputed` → `pseudo-scaffold`。34mer 仍是多对多，也不能唯一确定接触位点之外的残基；因此 imputed 输出只是兼容 scaffold，不是真实全长恢复。
 
@@ -50,7 +51,7 @@ PBR 与 pseudo 相互配合但不能互换：PBR 是连续、可折叠的结构�
 
 34-aa registry 使用两类不同的 DTU 资源。NetMHCpan 4.2f 与 NetMHCIIpan 4.3k 的公开支持名称快照定义比较范围；随库保存的 `NetMHCpan-4.2e-training-pseudoseqs.dat` 和 `NetMHCIIpan-4.3k-training-pseudosequence.2023.dat` 是 training pseudosequence 的直接主来源。这里的 `4.2e` 是用户提供的 MHC-I pseudo 数据版本，并不表示另一份 4.2f support list 属于 4.2e。人/鼠范围中，本地覆盖 10,395 个 MHC-I 支持名称中的 8,744 个，以及 11,344 个 MHC-II 支持分子中的 8,976 个。
 
-捆绑的 24,465 行 pseudo（MHC-I 15,489；MHC-II 8,976）明确区分证据：DTU 直接 pseudo 5,848、DTU 链组件组合 3,339、strict PBR 精确派生 10,808、接触位点完整的 deposited partial 派生 3,844、legacy secondary 626。`H-2-Kq` 现由 MHC-I DTU 快照直接提供。原始文本快照及其 SHA-256 会随库保留以便复现；仓库不包含 DTU 可执行程序或模型。
+生成的 24,465 行基础 pseudo（MHC-I 15,489；MHC-II 8,976）明确区分证据：DTU 直接 pseudo 5,848、DTU 链组件组合 3,339、strict PBR 精确派生 10,808、接触位点完整的 deposited partial 派生 3,844、legacy secondary 626。运行时再加载 11 条人工核实的定向恢复 pseudo，总数为 24,476。`H-2-Kq` 由 MHC-I DTU 快照直接提供；其余定向 accession 恢复不会改变 DTU 来源标记。原始文本快照及其 SHA-256 会随库保留以便复现；仓库不包含 DTU 可执行程序或模型。
 
 现行命名处理也显式记录：历史 `HLA-DQA1*01:07` 与 `HLA-DRB1*15:13` 输入分别解析到当前 `HLA-DQA1*01:07Q` 与 `HLA-DRB1*15:13Q`；`DRB1_13100` 这类可变位数字段会解析成 `HLA-DRB1*13:100`，而不是 `*131:00`。DTU pseudo 对 pseudo 表示具有优先级，但不兼容的 deposited strict PBR 不会被静默改写；strict 记录仍保留为生物来源证据，`--require-pseudo-match` 会在需要时选择单独标注的 synthetic fallback。Component registry 含 4,390 条链 pseudo，另有 344 条拒绝/冲突记录隔离。
 
@@ -58,7 +59,9 @@ PBR 与 pseudo 相互配合但不能互换：PBR 是连续、可折叠的结构�
 
 deposited records 包含不完整条目。默认查询只返回官方 `Full` 且无未知残基的人链，或通过 accession/fragment/长度检查的鼠链；片段与合成构建必须显式开启。`partial` 不会补尾，`imputed` 要求 deposited 引导，`pseudo-scaffold` 是最低证据级别。带 `N/L/S/Q/C/A` 表达后缀的人 HLA 默认仍禁止进入 AF3。当前鼠库是常用、可追溯 H-2 集合，不声称穷尽全部 IPD-MHC。
 
-当前构建含 full fallback 13,219 条、AF3 fallback 6,628 条、PBR fallback 6,628 条。硬合同覆盖全部 18,080 个唯一 pseudo 链组件：11,559 个选择 strict PBR，6,521 个选择显式 fallback，未覆盖为 0。仅 17 个组件需要最多 1 aa 的有界坐标恢复，其中 12 个含 alignment-gap contact，最大偏移为 1 aa。这些计数由构建器写入 [`metadata.json`](src/mhctransform/data/metadata.json)；它们描述构建或来源片段，不代表新增了同等数量的已验证生物学全长序列。
+当前基础构建含 full fallback 13,219 条、AF3 fallback 6,628 条、PBR fallback 6,646 条；最后一个数字包括 18 条 partial-masked PBR。其中 17 条保留了不同 ID 的模板补全记录；`H-2-IEu` beta PBR 明确没有 imputed 对照。基础硬合同覆盖全部 18,080 个唯一 pseudo 链组件：11,559 个选择 strict PBR，6,521 个选择显式 fallback，未覆盖为 0。仅 17 个基础组件需要最多 1 aa 的有界坐标恢复，其中 12 个含 alignment-gap contact，最大偏移为 1 aa。
+
+小型 accession 定向覆盖层增加 11 条 deposited full/partial、7 条 strict AF3、10 条 strict PBR、2 条 exact-ectodomain AF3 fallback、11 条 derived pseudo、12 条组件证书及 8 个 molecule pair。合并后的运行时总数为：deposited full/partial 29,525、strict AF3 13,491、strict PBR 13,492、AF3 fallback 6,630、PBR fallback 6,646、pseudo 24,476、认证 pseudo 组件 18,091。[`metadata.json`](src/mhctransform/data/metadata.json) 分开标记基础生成计数与运行时覆盖计数；`MHCRegistry.stats()` 返回合并后的运行时视图。
 
 ## 使用
 
@@ -119,12 +122,19 @@ mhctransform molecule-to-pbr \
   'HLA-DRA*01:01/HLA-DRB1*13:10' --class II \
   --require-pseudo-match
 
+# 显式 partial-masked PBR：未知的第 1 位为 X，而不是模板残基
+mhctransform allele-to-pbr 'HLA-A*02:50' --class I --fallback partial
+
 # 反查返回所有精确链候选
 mhctransform pbr-to-allele @pbr_chain.txt \
   --class I --definition mhci-alpha1-alpha2-v1
+
+# 含 X 的 PBR 反查必须显式开启，结果为 compatible_*，绝不是 exact_*
+mhctransform pbr-to-allele @masked_pbr_chain.txt \
+  --class I --include-fallback partial
 ```
 
-MHC-I 的 `molecule-to-pbr` 有意省略 alpha3 与 B2M；MHC-II 返回两个 sequence object，绝不人工拼接。常见 reviewed domain 长度为 MHC-I 182 aa、MHC-II alpha1 84–96 aa、beta1 90–95 aa；实际边界按位点和等位基因投影。`--require-pseudo-match` 会依据 [`pseudo_pbr_projection.csv`](src/mhctransform/data/pseudo_pbr_projection.csv) 为每个组件选择认证链：优先兼容的 strict PBR；若 DTU pseudo 与 deposited strict 链冲突，则保留 strict 链不变，并返回单独标注的 synthetic fallback。MHC-II alpha1 与 beta1 分别认证。后备 PBR 与 AF3 后备一样保留 observed/imputed spans 和证据等级。
+MHC-I 的 `molecule-to-pbr` 有意省略 alpha3 与 B2M；MHC-II 返回两个 sequence object，绝不人工拼接。常见 reviewed domain 长度为 MHC-I 182 aa、MHC-II alpha1 84–96 aa、beta1 90–95 aa；实际边界按位点和等位基因投影。`--require-pseudo-match` 会依据 [`pseudo_pbr_projection.csv`](src/mhctransform/data/pseudo_pbr_projection.csv) 为每个组件选择认证链：优先兼容的 strict PBR；若 DTU pseudo 与 deposited strict 链冲突，则保留 strict 链不变，并返回单独标注的 fallback。MHC-II alpha1 与 beta1 分别认证。Masked PBR 会把 `source_partial_masked`、`unknown_spans_1based` 和 `unknown_residue_count` 与 imputed 区间分开报告；模板元数据只用于审计坐标框架。
 
 ### AF3 胞外链与两链配对
 
@@ -166,7 +176,7 @@ mhctransform molecule-to-af3 'H-2-IAq' \
   --class II --fallback pseudo-scaffold
 ```
 
-每个后备候选都会报告 `evidence_level`、deposited-observed/imputed 区间与数量、来源记录、模板记录/等位基因、pseudo 距离、未确定的 `X` 位点及质量标志。若 deposited fragment 已覆盖完整胞外目标，则提升为 `source_exact_ectodomain`；更短的片段绝不直接作为 AF3 链，必须进入 `imputed` 模式。未直接观察的位置包含模板来源与 pseudo 约束残基，pseudo 来源另行保留。`H-2-IAs` 不再使用推断：UniProt P14437 提供精确的 1–195 α 链胞外区，可与精确 β 链配对；`H-2-IAq` 与 `H-2-IAu` 的 α 链仍需 imputed。反向查询默认排除后备构建；只有显式给出 `--include-fallback` 才纳入，并只表示构建兼容性，不证明真实生物学等位基因。
+每个后备候选都会报告 `evidence_level`、逐残基来源区间/数量、来源记录、模板记录/等位基因、pseudo 距离及质量标志。若 deposited fragment 已覆盖完整胞外目标，则提升为 `source_exact_ectodomain`；更短的片段绝不直接作为 AF3 链，必须进入 `imputed` 模式。AF3 合成构建的未观测位置仍明确标为模板来源；partial-masked PBR 则把未观测位置替换成 `X`，不会把模板残基冒充为观测真值。含 `X` 的序列仅适合支持 MASK 的语言模型或缺失数据比较，不能直接作为 AF3 蛋白序列提交。`H-2-IAs` 不再使用推断：UniProt P14437 提供精确的 1–195 α 链胞外区，可与精确 β 链配对；`H-2-IAq` 与 `H-2-IAu` 的 AF3 α 链仍需 imputed，但其显式开启的 PBR 可使用诚实的 partial-masked 表示。`H-2-IEu` 的 alpha 来自 P14439 精确序列；beta1 PBR 根据 M12826.1/AAA39645.1 在 N 端保留 1 个 `X`，34 个 pseudo contact 全部为实测残基，但不把该不完整 beta 记录暴露为 AF3 链。`H-2-IAp`、`H-2-IEp`、`H-2-IEr` 因仍找不到可独立审计的另一条链 accession 而保持未解析。反向查询默认排除后备表示；只有显式给出 `--include-fallback` 才纳入，并只表示兼容性，不证明真实生物学等位基因。
 
 审核集中稀有名称的代表性结果：
 
@@ -180,6 +190,7 @@ mhctransform molecule-to-af3 'H-2-IAq' \
 | `H-2-IAs` | α 为 233-aa mature membrane record | α 195 aa + β 197 aa | 两条均 strict exact；α 来自 P14437 |
 | `H-2-IAq` | α fragment | α 195 aa + β 200 aa | α 由 `H2-Aa*k` 补全；β exact |
 | `H-2-IAu` | α fragment | α 195 aa + β 197 aa | α 由 `H2-Aa*k` 补全；β exact |
+| `H-2-IEu` | β N 端不完整 | 不提供双链 AF3 | α exact；β PBR 含 1 个 `X`；34 个 contact 全部已观测 |
 
 ### 34 aa 双向转换
 
