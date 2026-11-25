@@ -22,6 +22,20 @@ CODONS = runpy.run_path(str(ROOT / 'tools/build_junction_reference.py'))['CODON_
 DATA = ROOT / 'src/tcrtransform/data'
 
 
+def j_anchor(species, allele, sequence):
+    """Prefer sequence-validated annotated exceptions to motif inference."""
+    overrides = json.loads((DATA / 'j_anchor_overrides.json').read_text())['records']
+    for row in overrides:
+        if (row['species'], row['allele']) == (species, allele):
+            index = row['cdr3_anchor_index']
+            if sequence != row['sequence'] or sequence[index] != row['cdr3_anchor']:
+                raise ValueError(f'J anchor annotation requires review: {species} {allele} sequence changed')
+            return index
+    # Lookahead retains overlapping candidates, e.g. FIFGSG.
+    matches = list(re.finditer(r'(?=[FWC][A-Z]{2}G)', sequence))
+    return matches[-1].start() if matches else -1
+
+
 def fetch(item):
     species, latin, group = item
     url = f'https://www.imgt.org/download/V-QUEST/IMGT_V-QUEST_reference_directory/{latin}/TR/{group}.fasta'
@@ -49,9 +63,7 @@ def fetch(item):
                 anchor = len(aligned[:c_column].replace('.', ''))
             loops = [aligned[a:b].replace('.', '') for a, b in spans]
         else:
-            matches = list(re.finditer(r'(?=[FWC][A-Z]{2}G)', aa))
-            if matches:
-                anchor = matches[-1].start()
+            anchor = j_anchor(species, fields[1], aa)
             coding = nt.replace('.', '')[offset:]
             remainder = coding[len(coding)//3*3:]
             if group == 'TRAJ' and len(remainder) == 1:
@@ -103,7 +115,10 @@ def update_gene_tables(rows):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--from-bundled', action='store_true', help='Rebuild derived tables from the existing downloaded snapshot')
+    parser.add_argument('--j-anchors-only', action='store_true', help='With --from-bundled, update only changed J anchors and their canonical junction rows')
     args = parser.parse_args()
+    if args.j_anchors_only and not args.from_bundled:
+        parser.error('--j-anchors-only requires --from-bundled')
     items = [(s,l,g) for s,l in [('human','Homo_sapiens'),('mouse','Mus_musculus')] for g in ['TRAV','TRAJ','TRBV','TRBJ']]
     rows, sources = [], []
     if args.from_bundled:
@@ -114,16 +129,36 @@ def main():
         with concurrent.futures.ThreadPoolExecutor(8) as pool:
             for records, source in pool.map(fetch, items):
                 rows.extend(records); sources.append(source)
+    changed = []
     for row in rows:
         if row['region'] == 'J':
-            # Overlapping motifs (e.g. FIFGSG) must select the downstream F.
-            matches = list(re.finditer(r'(?=[FWC][A-Z]{2}G)', row['sequence']))
-            anchor = matches[-1].start() if matches else -1
+            anchor = j_anchor(row['species'], row['allele'], row['sequence'])
+            if int(row['cdr3_anchor_index']) != anchor:
+                changed.append(row)
             row.update(cdr3_anchor_index=anchor, cdr3_anchor=row['sequence'][anchor] if anchor >= 0 else '')
+        if args.j_anchors_only:
+            continue
         complete = row['region'] != 'V' or (not row['aligned_sequence'].startswith('.') and len(row['sequence']) >= 80)
         row['usable'] = str(row['usable'] == 'true' and complete).lower()
     with (DATA/'imgt_tcr_alleles.csv').open('w', newline='') as out:
         writer=csv.DictWriter(out, fieldnames=list(rows[0]), lineterminator='\n'); writer.writeheader(); writer.writerows(rows)
+    if args.j_anchors_only:
+        junction_path = DATA / 'tcr_gene_junction_reference.csv'
+        with junction_path.open() as handle:
+            reader = csv.DictReader(handle)
+            fields = reader.fieldnames
+            junctions = {(r['species'], r['gene_name']): r for r in reader}
+        from tcrtransform.references import imgt_representatives
+        for row in changed:
+            representative = imgt_representatives(row['species']).get(row['gene'])
+            if representative and representative['allele'] == row['allele']:
+                entry = dict(row, gene_name=row['gene'], reference_allele=row['allele'])
+                junctions[row['species'], row['gene']] = {k: entry[k] for k in fields}
+        with junction_path.open('w', newline='') as handle:
+            writer = csv.DictWriter(handle, fieldnames=fields, lineterminator='\n')
+            writer.writeheader(); writer.writerows(junctions[k] for k in sorted(junctions))
+        print(f'Updated {len(changed)} J anchor records; amino-acid sequences unchanged')
+        return
     update_gene_tables(rows)
     from tcrtransform.references import imgt_representatives
     junction_fields = ['species', 'gene_name', 'reference_allele', 'region', 'cdr3_anchor', 'cdr3_anchor_index', 'jc_bridge', 'jc_bridge_codon']
@@ -138,6 +173,7 @@ def main():
     retrieved_on = (json.loads((DATA/'imgt_tcr_alleles.metadata.json').read_text())['retrieved_on']
                     if args.from_bundled else datetime.now(timezone.utc).date().isoformat())
     metadata = dict(retrieved_on=retrieved_on, sources=sources,
+        j_anchor_annotations='j_anchor_overrides.json; sequence-validated annotations take priority over motif inference',
         policy='Exact supported allele first; missing/incomplete alleles fall back to the gene representative. Runtime assesses geometry and retained stops after junction matching; P/ORF labels alone do not reject rearranged samples.',
         gene_policy='Preserve a functional exact existing representative where possible; otherwise prefer *01 then lowest allele. Human TRAJ24 uses *02; mouse TRAV13D-1, TRAV14-1, TRAV14D-1 and TRAJ49 use corrected *01.',
         usability='Historical strict subset only: F/(F)/[F], standard amino acids, conserved anchor; V N-terminus and at least 80 aa. Runtime also considers P/ORF and stop-bearing records with supported geometry.',

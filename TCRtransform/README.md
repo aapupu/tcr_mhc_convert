@@ -160,6 +160,13 @@ print(parsed.v_genes, parsed.j_genes, parsed.cdr3)
 
 ## Reference data and scope
 
+Noncanonical J boundaries are supported through sequence-validated annotations:
+mouse `TRAJ44*01` uses L at position 10, mouse `TRAJ7*01` L at position 9, and
+human `TRAJ61*01` F at position 9 (1-based). `j_anchor_overrides.json` records the
+IMGT sequence/accession and pinned tcrdist boundary provenance. These annotations
+take priority over motif inference; a changed sequence requires review. Rebuild
+only J anchors offline with `python tools/build_imgt_reference.py --from-bundled --j-anchors-only`.
+
 - Supported species: `Homo sapiens` and `Mus musculus`.
 - Available V/J alleles (`*01`, `*02`, `*03`, and other supported suffixes) take priority. A missing suffix uses the gene representative; an unknown or incomplete functional allele falls back to that same representative. If the gene is absent too, conversion fails. `TCR*_reference_resolution` reports `exact`, `gene_level`, or `gene_level_fallback` separately for V/J/C. C references remain gene-level.
 - Germline P/ORF labels and stop codons do not by themselves reject a rearranged receptor. References with supported geometry are matched first; a stop removed at a supported V/J junction is allowed and reported. A stop remaining in the reconstructed chain produces a review error. Stops are never silently deleted from retained sequence. P/ORF labels generate review warnings, not a claim that the sample is unproductive.

@@ -1,5 +1,6 @@
 {
   "retrieved_on": "2026-11-25",
+  "j_anchor_annotations": "j_anchor_overrides.json; sequence-validated annotations take priority over motif inference",
   "sources": [
     {
       "url": "https://www.imgt.org/download/V-QUEST/IMGT_V-QUEST_reference_directory/Homo_sapiens/TR/TRAV.fasta",

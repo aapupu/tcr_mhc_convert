@@ -1,5 +1,25 @@
 # IMGT TCR corrections — 2026-11-25
 
+## Noncanonical J boundary fix
+
+The `[FWC]XXG` heuristic missed mouse TRAJ44 (L, zero-based index 9), mouse
+TRAJ7 (L, index 8), and human TRAJ61 (F, index 8; FGAN rather than FxxG).
+Their pinned tcrdist CDR endpoints agree with the pre-update junction table and
+map to identical ungapped IMGT sequences (M64239, M64239, M94081 respectively).
+`j_anchor_overrides.json` now records those three sequence-validated annotations.
+Both online and offline generation use the same resolver. Unknown sequences
+are not given a permissive generic L/F anchor; changed annotated sequences fail
+generation for review. The targeted refresh changes only three allele anchor
+fields and adds their three canonical junction entries, retaining ORF warnings.
+
+Regression tests cover two constructed CDR3 inputs per gene (six cases), full
+sequence equality to independently assembled expected chains, reverse parsing,
+guarded short J matches, and rejection of changed override sequences. These are
+new regression examples, not the user's six private CSV examples.
+All six were also executed against archived code/reference commit `e8d444f`;
+the reconstructed complete chains match the corrected version character for
+character. All 16 tests pass. A second targeted regeneration changes zero anchors.
+
 ## Follow-up: rearrangement-aware eligibility
 
 The strict eligibility policy and counts below describe the initial correction

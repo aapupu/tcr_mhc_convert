@@ -160,6 +160,12 @@ print(parsed.v_genes, parsed.j_genes, parsed.cdr3)
 
 ## 参考数据与适用范围
 
+非典型 J 边界通过完整序列校验的注释支持：小鼠 `TRAJ44*01` 的第 10 位 L、
+小鼠 `TRAJ7*01` 的第 9 位 L、人类 `TRAJ61*01` 的第 9 位 F（从 1 开始）。
+`j_anchor_overrides.json` 保存 IMGT 序列/accession 与固定 tcrdist 边界来源。
+这些注释优先于模式推断；序列发生变化则要求复核。仅离线修复 J 锚点可运行
+`python tools/build_imgt_reference.py --from-bundled --j-anchors-only`。
+
 - 支持物种：`Homo sapiens` 和 `Mus musculus`。
 - 优先使用已收录的 V/J 等位基因（`*01`、`*02`、`*03` 及其他可用编号）。未提供编号时使用 gene-level 代表序列；编号未收录或功能性等位基因序列不完整时，回退到同一 gene-level 代表。基因也不存在则报错。`TCR*_reference_resolution` 按 V/J/C 分别标记 `exact`、`gene_level`、`gene_level_fallback`。C 区仍使用 gene-level 参考。
 - Germline 的 P/ORF 标签或终止符不能单独用于拒绝实际重排的受体。有可靠边界的参考先进行拼接；在有证据支持的 V/J 接头中被移除的终止符允许通过并记录，拼接后仍保留终止符则报错并要求复核。绝不直接删除保留区域内的终止符。P/ORF 作为复核提示，不代表样本一定不 productive。

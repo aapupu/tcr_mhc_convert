@@ -1,0 +1,9 @@
+{
+  "source": "combo_xcr_2024-03-05.tsv; tcrdist3 commit 0e6efa39092e2c64c9c0b52a72c2f5961c161ebb; annotated cdr_columns/cdrs endpoint mapped to identical ungapped IMGT sequence",
+  "index_convention": "zero-based, inclusive CDR3 terminal residue",
+  "records": [
+    {"species": "mouse", "allele": "TRAJ44*01", "accession": "M64239", "sequence": "VTGSGGKLTLGAGTRLQVNL", "cdr3_anchor": "L", "cdr3_anchor_index": 9},
+    {"species": "mouse", "allele": "TRAJ7*01", "accession": "M64239", "sequence": "DYSNNRLTLGKGTQVVVLP", "cdr3_anchor": "L", "cdr3_anchor_index": 8},
+    {"species": "human", "allele": "TRAJ61*01", "accession": "M94081", "sequence": "YRVNRKLTFGANTRGIMKL", "cdr3_anchor": "F", "cdr3_anchor_index": 8}
+  ]
+}

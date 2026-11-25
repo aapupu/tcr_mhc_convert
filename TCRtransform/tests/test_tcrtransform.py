@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import runpy
 import tempfile
 import unittest
 from pathlib import Path
@@ -124,6 +125,40 @@ class ReferenceTests(unittest.TestCase):
             j_gene='TRAJ1*01', cdr3='CAVRYESITSQLQF')
         self.assertIn('germline_ORF', result.reference_warnings)
         self.assertEqual(result.productivity_status, 'not_assessed')
+
+    def test_noncanonical_j_boundaries_reconstruct_and_parse(self) -> None:
+        cases = [('mouse', 'TRAJ44', 'VTGSGGKLTLGAGTRLQVNL', 9, 'D'),
+                 ('mouse', 'TRAJ7', 'DYSNNRLTLGKGTQVVVLP', 8, 'N'),
+                 ('human', 'TRAJ61', 'YRVNRKLTFGANTRGIMKL', 8, 'N')]
+        for species, gene, j_sequence, index, bridge in cases:
+            genes = load_gene_sequences(species)
+            junctions = load_junction_reference(species)
+            v_gene = 'TRAV1*01' if species == 'mouse' else 'TRAV1-1*01'
+            v_index = junctions[v_gene].cdr3_anchor_index
+            self.assertEqual(junctions[gene].cdr3_anchor_index, index)
+            self.assertEqual(junctions[gene + '*01'].cdr3_anchor, j_sequence[index])
+            for suffix in [j_sequence[:index + 1], j_sequence[index - 2:index + 1]]:
+                cdr3 = 'CAVR' + suffix
+                with self.subTest(species=species, gene=gene, cdr3=cdr3):
+                    result = reconstruct_tcr_chain(species=species, chain='A',
+                        v_gene=v_gene, j_gene=gene + '*01', cdr3=cdr3)
+                    expected = genes[v_gene][:v_index] + cdr3 + j_sequence[index + 1:] + bridge + genes['TRAC']
+                    self.assertEqual(result.sequence, expected)
+                    self.assertEqual(parse_chain(result.sequence, 'A', species=species).cdr3, cdr3)
+                    self.assertIn('germline_ORF', result.reference_warnings)
+            # Noncanonical L anchors also support guarded short matches.
+            self.assertIsNotNone(match_j_terminal('CQQ' + j_sequence[index-1:index+1],
+                j_sequence, min_overlap=2, max_overlap=2, junction=junctions[gene]))
+
+    def test_j_anchor_generator_validates_annotated_exceptions(self) -> None:
+        builder = Path(__file__).resolve().parents[1] / 'tools/build_imgt_reference.py'
+        resolve = runpy.run_path(str(builder))['j_anchor']
+        self.assertEqual(resolve('mouse', 'TRAJ44*01', 'VTGSGGKLTLGAGTRLQVNL'), 9)
+        self.assertEqual(resolve('mouse', 'TRAJ7*01', 'DYSNNRLTLGKGTQVVVLP'), 8)
+        self.assertEqual(resolve('human', 'TRAJ61*01', 'YRVNRKLTFGANTRGIMKL'), 8)
+        self.assertEqual(resolve('human', 'UNKNOWN*01', 'YRVNRKLTFGANTRGIMKL'), -1)
+        with self.assertRaisesRegex(ValueError, 'requires review'):
+            resolve('human', 'TRAJ61*01', 'ARVNRKLTFGANTRGIMKL')
 
 
 class BoundaryTests(unittest.TestCase):
