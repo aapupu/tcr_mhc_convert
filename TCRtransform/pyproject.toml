@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tcrtransform"
-version = "0.2.0"
+version = "0.3.0"
 description = "Human and mouse TCR sequence reconstruction and CDR region annotation"
 readme = "README.md"
 license = {file = "LICENSE"}

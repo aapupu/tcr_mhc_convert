@@ -162,6 +162,70 @@ class ReferenceTests(unittest.TestCase):
 
 
 class BoundaryTests(unittest.TestCase):
+    def test_allelic_v_anchor_and_single_f_after_anchor_filter(self) -> None:
+        r = reconstruct_tcr_chain(species='human', chain='B', v_gene='TRBV12-3*01',
+            j_gene='TRBJ2-7*02', cdr3='CASSRLGGTYEQYV')
+        self.assertIn('J:exact(TRBJ2-7*02)', r.reference_resolution)
+        self.assertEqual(r.j_match.sequence[-1], 'V')
+        r = reconstruct_tcr_chain(species='human', chain='B', v_gene='TRBV12-3*01',
+            j_gene='TRBJ2-1*01', cdr3='CASSQGSSGRRAF', min_overlap=1)
+        self.assertEqual((r.j_match.length, r.j_match.gene_start), (1, 6))
+        with self.assertRaises(ValueError):
+            reconstruct_tcr_chain(species='human', chain='B', v_gene='TRBV12-3*01',
+                j_gene='TRBJ2-1*01', cdr3='CASSQGSSGRRAF')
+
+    def test_terminal_correction_is_explicit_and_context_limited(self) -> None:
+        alpha = reconstruct_tcr_chain(species='human', chain='A', v_gene='TRAV1-1*01',
+            j_gene='TRAJ6', cdr3='CASGGSYIPTY', min_overlap=1, correct_terminal_to_f=True)
+        self.assertEqual(alpha.cdr3, 'CASGGSYIPTF')
+        args = dict(species='human',chain='B',v_gene='TRBV12-3*01',j_gene='TRBJ2-7*01',cdr3='CASSLAGSKLYEQYC')
+        with self.assertRaises(ValueError):
+            reconstruct_tcr_chain(**args)
+        r = reconstruct_tcr_chain(**args, correct_terminal_to_f=True)
+        self.assertEqual(r.input_cdr3, args['cdr3'])
+        self.assertEqual(r.cdr3, 'CASSLAGSKLYEQYF')
+        with self.assertRaises(ValueError):
+            reconstruct_tcr_chain(**dict(args,cdr3='CASSQQQQC'), correct_terminal_to_f=True)
+        variable = r.sequence[:-len(load_gene_sequences('human')['TRBC2'])]
+        pos = variable.index(r.cdr3) + len(r.cdr3) - 1
+        observed = variable[:pos] + 'C' + variable[pos+1:]
+        with self.assertRaisesRegex(ValueError, 'conflicts with observed'):
+            reconstruct_tcr_chain(**args, correct_terminal_to_f=True,
+                observed_sequence=observed, observed_kind='variable')
+        kept = reconstruct_tcr_chain(**args, prefer_observed=True,
+            observed_sequence=observed, observed_kind='variable')
+        self.assertIn(args['cdr3'], kept.sequence)
+
+    def test_missing_c_requires_observed_boundary_not_blind_prefix(self) -> None:
+        genes = load_gene_sequences('human'); meta = load_junction_reference('human')
+        v='TRAV1-1*01'; j='TRAJ17*01'; cdr3='CPAAGNKLTF'
+        observed = genes[v][:meta[v].cdr3_anchor_index] + cdr3 + genes[j][meta[j].cdr3_anchor_index+1:]
+        args=dict(species='human',chain='A',v_gene=v,j_gene=j,cdr3='PAAGNKLTF')
+        with self.assertRaises(ValueError):
+            reconstruct_tcr_chain(**args, complete_cdr3_from_observed=True)
+        r = reconstruct_tcr_chain(**args, observed_sequence=observed,observed_kind='variable',
+            complete_cdr3_from_observed=True,prefer_observed=True)
+        self.assertEqual(r.cdr3,cdr3)
+        self.assertTrue(r.sequence.startswith(observed))
+        with self.assertRaises(ValueError):
+            reconstruct_tcr_chain(**dict(args,cdr3='NTDKLIF'), observed_sequence=observed,
+                observed_kind='variable',complete_cdr3_from_observed=True,prefer_observed=True)
+
+    def test_observed_r_preserved_where_germline_has_stop(self) -> None:
+        genes=load_gene_sequences('human'); meta=load_junction_reference('human')
+        v='TRBV12-2*01'; j='TRBJ2-7*01'; cdr3='CASRLNEQYF'
+        observed=genes[v][:meta[v].cdr3_anchor_index].replace('*','R')+cdr3+genes[j][meta[j].cdr3_anchor_index+1:]+genes['TRBC2']
+        args=dict(species='human',chain='B',v_gene=v,j_gene=j,cdr3=cdr3)
+        with self.assertRaisesRegex(ValueError,'retained_stop'):
+            reconstruct_tcr_chain(**args)
+        result=reconstruct_tcr_chain(**args,observed_sequence=observed,prefer_observed=True)
+        self.assertEqual(result.sequence,observed)
+        self.assertIn('52:*->R',result.reference_warnings)
+        self.assertEqual(result.productivity_status,'not_assessed')
+        self.assertIsNone(result.v_match)
+        with self.assertRaises(ValueError):
+            reconstruct_tcr_chain(**args,observed_sequence='A'*len(observed),prefer_observed=True)
+
     def test_guarded_short_matches(self) -> None:
         v_meta = JunctionMetadata("human", "TRAVX", "TRAVX*01", "V", "C", 4)
         j_meta = JunctionMetadata("human", "TRAJX", "TRAJX*01", "J", "F", 3)
@@ -246,6 +310,29 @@ class BoundaryTests(unittest.TestCase):
 
 
 class RoundTripTests(unittest.TestCase):
+    def test_cli_preserves_observed_stop_replacement_and_original_columns(self) -> None:
+        genes=load_gene_sequences('human'); meta=load_junction_reference('human')
+        v='TRBV12-2*01'; j='TRBJ2-7*01'; cdr3='CASRLNEQYF'
+        observed=genes[v][:meta[v].cdr3_anchor_index].replace('*','R')+cdr3+genes[j][meta[j].cdr3_anchor_index+1:]+genes['TRBC2']
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'input.csv'; out=Path(directory)/'out.csv'
+            with path.open('w',newline='') as handle:
+                writer=csv.writer(handle)
+                writer.writerow(['TRAV','TRAJ','CDR3A','TRBV','TRBJ','CDR3B','OTSbeta','productive'])
+                for sequence in [observed, 'A'*len(observed)]:
+                    writer.writerow(['TRAV1-1','TRAJ33','CAVRDSNYQLIW',v,j,cdr3,sequence,'True'])
+            cli_main(['build',str(path),'-o',str(out),'--observed-beta-column','OTSbeta','--prefer-observed'])
+            with out.open() as handle:
+                rows=list(csv.DictReader(handle))
+            self.assertEqual(rows[0]['TCRb'],observed)
+            self.assertEqual(rows[0]['TCRb_sequence_source'],'observed_full')
+            self.assertEqual(rows[0]['TCRb_input_cdr3'],cdr3)
+            self.assertEqual(rows[0]['CDR2b'],'')
+            self.assertIn('52:*->R',rows[0]['TCRb_reference_warnings'])
+            self.assertEqual([r['productive'] for r in rows],['True','True'])
+            self.assertEqual(len(rows),2)
+            self.assertTrue(rows[1]['tcrtransform_status'].startswith('error:'))
+
     @classmethod
     def setUpClass(cls) -> None:
         cls.species = "mouse"

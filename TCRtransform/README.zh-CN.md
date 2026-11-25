@@ -160,6 +160,38 @@ print(parsed.v_genes, parsed.j_genes, parsed.cdr3)
 
 ## 参考数据与适用范围
 
+### 限定恢复选项（0.3.0）
+
+人类 `TRBJ2-7*02` 使用其已注释的 **V** 锚点（从 0 开始的第 5 位），不再回退到
+`*01` 的 F。J 区先按注释锚点位置筛选，再判断唯一性。因此显式开启
+`--min-overlap 1` 后，单个末端 F 能匹配 `TRBJ2-1*01` 中第二个 F；默认阈值仍为 3。
+
+以下恢复均需显式开启。保留输入列及 `productive`，并用 `TCR*_input_cdr3`、
+`TCR*_sequence_source`、`TCR*_reference_warnings` 记录原值、来源及修改原因。
+
+| build 选项 | 限定条件 |
+|---|---|
+| `--correct-terminal-to-f` | 仅修改 CDR3 最后一位；指定 J 锚点必须为 F，且前面三个 J 残基完全一致。若提供的原始序列与修正后的 CDR3 冲突则拒绝。没有原始序列时属于显式假设，不能视为已验证的生物学纠错。 |
+| `--complete-cdr3-from-observed` | 缺失起始 C 时，依据提供的成熟可变区/胞外链重新定位；输入必须是该实际 CDR3 中唯一出现的后缀。不会无条件前补 C。 |
+| `--prefer-observed` | 保留原始残基，包括 germline 为终止符而原始序列为 R，或 CDR3 末端与参考不同的情况。需提供原始序列列并通过 V-C/J-tail 边界校验。 |
+
+使用 `--observed-alpha-column OTSalpha` 和/或 `--observed-beta-column OTSbeta`。
+`--observed-kind full`（默认）表示成熟胞外 VJ + bridge + 本库常量区；`variable`
+表示成熟 VJ，**不含** TRAJ/TRAC bridge 和常量区，程序随后补入这两部分。
+该恢复流程不处理信号肽、V 区插入缺失或任意表达载体构建。校验要求 C 坐标一致、
+至少 50 个可比较 V 残基且一致率不低于 95%（排除参考终止符），以及锚点后的 J 尾部精确匹配。
+证据不一致时保留输入行，标记错误等待复核。
+
+```bash
+tcrtransform build input.csv -o recovered.csv --min-overlap 1 \
+  --observed-beta-column OTSbeta --observed-kind full --prefer-observed
+```
+
+Python 的 `reconstruct_tcr_chain` 支持同名下划线参数，以及 `observed_sequence`。
+保留原始序列时返回 `v_match/j_match=None`；CSV 对这类行留空 germline 环区及分区注释，
+避免把实际变体误标为 germline 支持。仍提供解析后的 CDR3 和完整序列。
+Productivity 保持 `not_assessed`，不会自动重写或剔除训练/测试数据。
+
 非典型 J 边界通过完整序列校验的注释支持：小鼠 `TRAJ44*01` 的第 10 位 L、
 小鼠 `TRAJ7*01` 的第 9 位 L、人类 `TRAJ61*01` 的第 9 位 F（从 1 开始）。
 `j_anchor_overrides.json` 保存 IMGT 序列/accession 与固定 tcrdist 边界来源。

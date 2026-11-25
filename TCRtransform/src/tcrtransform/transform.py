@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from .errors import TCRTransformError
@@ -35,8 +35,8 @@ class ReconstructedChain:
     v_gene: str
     j_gene: str
     constant_gene: str
-    v_match: TerminalMatch
-    j_match: TerminalMatch
+    v_match: TerminalMatch | None
+    j_match: TerminalMatch | None
     jc_bridge: str
     v_reference_gene: str
     j_reference_gene: str
@@ -44,6 +44,8 @@ class ReconstructedChain:
     reference_resolution: str
     reference_warnings: str = ""
     productivity_status: str = "not_assessed"
+    input_cdr3: str = ""
+    sequence_source: str = "reference_reconstruction"
 
 
 @dataclass(frozen=True)
@@ -122,7 +124,7 @@ def _missing_boundary_message(
     )
 
 
-def reconstruct_tcr_chain(
+def _reconstruct_reference_chain(
     *,
     cdr3: object,
     v_gene: object,
@@ -158,6 +160,8 @@ def reconstruct_tcr_chain(
         raise TCRTransformError("boundary windows must be non-negative")
 
     cdr3 = clean_sequence(cdr3, f"TCR {chain} CDR3")
+    if not cdr3.startswith('C'):
+        raise TCRTransformError('CDR3 must include the starting C; use observed boundary completion with sequence evidence')
     v_gene = normalize_gene(v_gene, f"TCR {chain} V gene")
     j_gene = normalize_gene(j_gene, f"TCR {chain} J gene")
     _validate_chain_genes(chain, v_gene, j_gene)
@@ -305,6 +309,96 @@ def reconstruct_tcr_chain(
             f"C:{c_resolution}({constant_reference_gene})"
         ),
     )
+
+
+def reconstruct_tcr_chain(*, observed_sequence=None, observed_kind='full',
+                          complete_cdr3_from_observed=False, correct_terminal_to_f=False,
+                          prefer_observed=False, **kwargs) -> ReconstructedChain:
+    """Reconstruct, or explicitly preserve a validated observed mature chain.
+
+    Observed variable input is VJ without the TRAJ/TRAC bridge. Full input is
+    the mature model-ready extracellular chain. Evidence must have the same
+    V framework coordinates (>=95% identity, excluding reference stops), an
+    anchored C, and an exact J tail. No alignment-based indels are inferred.
+    """
+    original = clean_sequence(kwargs['cdr3'], 'CDR3')
+    cdr3 = original
+    if not any((observed_sequence, complete_cdr3_from_observed, correct_terminal_to_f, prefer_observed)):
+        return replace(_reconstruct_reference_chain(**kwargs), input_cdr3=original)
+    species = normalize_species(kwargs.get('species', 'human'))
+    chain = str(kwargs['chain']).upper()
+    v = normalize_gene(kwargs['v_gene']); j = normalize_gene(kwargs['j_gene'])
+    _validate_chain_genes(chain, v, j)
+    genes = kwargs.get('gene_sequences') or load_gene_sequences(species,
+        path=kwargs.get('gene_reference_path'), sequence_column=kwargs.get('sequence_column', 'amino_acid'))
+    junctions = kwargs.get('junctions') or load_junction_reference(species,
+        path=kwargs.get('junction_reference_path', DEFAULT_JUNCTION_REFERENCE))
+    vk, vs, vr = _resolve_sequence_with_key(genes, v)
+    jk, js, jr = _resolve_sequence_with_key(genes, j)
+    vm = get_junction_metadata(junctions, v); jm = get_junction_metadata(junctions, j)
+    if not vs or not js or vm is None or jm is None:
+        raise TCRTransformError('reference geometry unavailable for evidence-based processing')
+    constant = normalize_gene(kwargs.get('constant_gene') or ('TRAC' if chain == 'A' else choose_trbc_gene(j)))
+    if chain not in {'A', 'B'} or not constant.startswith('TRAC' if chain == 'A' else 'TRBC'):
+        raise TCRTransformError('constant gene or chain is inconsistent with the requested TCR chain')
+    ck, cs, cr = _resolve_sequence_with_key(genes, constant)
+    if not cs:
+        raise TCRTransformError('constant reference missing')
+    bridge = alpha_jc_bridge(junctions, j) if chain == 'A' else ''
+    warnings = []
+    observed = inferred_cdr3 = ''
+    if observed_sequence:
+        observed = clean_sequence(observed_sequence, 'observed sequence', allow_x=False)
+        if observed_kind not in {'full', 'variable'}:
+            raise TCRTransformError('observed_kind must be full or variable')
+        tail = js[jm.cdr3_anchor_index + 1:]
+        if observed_kind == 'full':
+            tail += bridge + cs
+        start = vm.cdr3_anchor_index
+        end = len(observed) - len(tail)
+        if not tail or not observed.endswith(tail) or end <= start or observed[start:start+1] != 'C':
+            raise TCRTransformError('observed sequence does not establish the specified V-C / J-tail boundaries')
+        pairs = [(a,b) for a,b in zip(vs[:start+1], observed[:start+1]) if a != '*']
+        if len(pairs) < 50 or sum(a==b for a,b in pairs)/len(pairs) < .95:
+            raise TCRTransformError('observed V framework is inconsistent with the specified reference')
+        inferred_cdr3 = observed[start:end]
+        differences = [f'{i+1}:{a}->{b}' for i,(a,b) in enumerate(zip(vs[:start+1],observed[:start+1])) if a!=b]
+        if differences:
+            warnings.append('observed_V_reference_differences_1based=' + ','.join(differences))
+        if inferred_cdr3[-1] != jm.cdr3_anchor:
+            warnings.append(f'observed_J_anchor={inferred_cdr3[-1]}:reference={jm.cdr3_anchor}')
+    if complete_cdr3_from_observed and not cdr3.startswith('C'):
+        if not inferred_cdr3 or not inferred_cdr3.endswith(cdr3) or inferred_cdr3.count(cdr3) != 1:
+            raise TCRTransformError('missing-C completion requires a unique suffix within observed anchored CDR3')
+        cdr3 = inferred_cdr3
+        warnings.append('cdr3_boundary_completed_from_observed')
+    if correct_terminal_to_f and cdr3[-1:] != jm.cdr3_anchor:
+        index = jm.cdr3_anchor_index
+        if jm.cdr3_anchor != 'F' or index < 3 or len(cdr3) < 5 or cdr3[-4:-1] != js[index-3:index]:
+            raise TCRTransformError('terminal correction requires an F anchor and three exact preceding J residues')
+        corrected = cdr3[:-1] + 'F'
+        if inferred_cdr3 and inferred_cdr3 != corrected:
+            raise TCRTransformError('terminal correction conflicts with observed sequence; preserve/review the observation')
+        warnings.append(f'explicit_terminal_correction:{cdr3[-1]}->F:unverified_without_observation')
+        cdr3 = corrected
+    if not cdr3.startswith('C'):
+        raise TCRTransformError('missing starting C requires observed boundary completion')
+    if prefer_observed:
+        if not observed or inferred_cdr3 != cdr3:
+            raise TCRTransformError('observed preservation requires the input/resolved CDR3 to match observed boundaries')
+        if chain == 'A' and not bridge:
+            raise TCRTransformError('TRAJ-TRAC bridge unavailable')
+        output = observed if observed_kind == 'full' else observed + bridge + cs
+        warnings.append('observed_sequence_preserved:reference_discrepancies_not_repaired')
+        return ReconstructedChain(output, species, chain, cdr3, v, j, constant,
+            None, None, bridge, vk, jk, ck, f'V:{vr}({vk});J:{jr}({jk});C:{cr}({ck})',
+            reference_warnings=';'.join(warnings), input_cdr3=original,
+            sequence_source='observed_full' if observed_kind == 'full' else 'observed_variable_plus_reference_constant')
+    if observed and inferred_cdr3 != cdr3:
+        raise TCRTransformError('input CDR3 conflicts with observed boundaries')
+    result = _reconstruct_reference_chain(**dict(kwargs, cdr3=cdr3))
+    return replace(result, input_cdr3=original,
+        reference_warnings=';'.join(filter(None, [result.reference_warnings, *warnings])))
 
 
 def build_tcr_chain(**kwargs: object) -> str:

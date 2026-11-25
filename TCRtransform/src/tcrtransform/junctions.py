@@ -232,6 +232,9 @@ def match_j_terminal(
     for length in range(max_length, min_overlap - 1, -1):
         query = cdr3[-length:]
         candidates = _find_j_candidates(j_sequence, query, start_window)
+        if junction is not None and junction.region == "J":
+            candidates = [p for p in candidates
+                          if p + length - 1 == junction.cdr3_anchor_index]
         if not candidates:
             continue
         if length <= 2 and not _valid_short_j_match(

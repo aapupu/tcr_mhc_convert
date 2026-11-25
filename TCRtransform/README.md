@@ -160,6 +160,43 @@ print(parsed.v_genes, parsed.j_genes, parsed.cdr3)
 
 ## Reference data and scope
 
+### Restricted recovery options (0.3.0)
+
+Human `TRBJ2-7*02` uses its annotated **V** anchor (zero-based index 5), without
+falling back to `*01` F. J matches are filtered by the annotated anchor position
+before uniqueness is checked. A single terminal F can therefore match the second
+F in `TRBJ2-1*01` when `--min-overlap 1` is explicitly enabled; the default remains 3.
+
+Recovery is opt-in. Input columns and `productive` are retained, and
+`TCR*_input_cdr3`, `TCR*_sequence_source`, and `TCR*_reference_warnings` record changes.
+
+| Build option | Conditions |
+|---|---|
+| `--correct-terminal-to-f` | Change only the last CDR3 residue, only when the selected J anchor is F and the three preceding J residues match exactly. Reject if the supplied observation disagrees with the corrected CDR3. Without observation, this is an explicit assumption, not a verified biological correction. |
+| `--complete-cdr3-from-observed` | For a CDR3 missing initial C, recover its full boundary from a supplied mature variable/full sequence; require the input to be a unique suffix of that observed anchored CDR3. Never blindly prepend C. |
+| `--prefer-observed` | Preserve supplied residues, including R where germline has a stop and a nonreference terminal CDR3 residue. Requires observed sequence columns and validated V-C/J-tail boundaries. |
+
+Use `--observed-alpha-column OTSalpha` and/or `--observed-beta-column OTSbeta`.
+`--observed-kind full` (default) means the mature extracellular VJ + bridge +
+bundled constant chain; `variable` means mature VJ **excluding** the TRAJ/TRAC
+bridge and constant, which are appended from references. Signal peptides, V-region
+indels and arbitrary expression constructs are not handled by this recovery path.
+Validation requires the reference C coordinate, at least 50 comparable V residues
+with >=95% identity (excluding germline stops), and an exact post-anchor J tail.
+Inconsistent observations are retained as input rows with a review error.
+
+```bash
+tcrtransform build input.csv -o recovered.csv --min-overlap 1 \
+  --observed-beta-column OTSbeta --observed-kind full --prefer-observed
+```
+
+For Python, `reconstruct_tcr_chain` accepts `observed_sequence`, `observed_kind`,
+`prefer_observed`, `complete_cdr3_from_observed`, and `correct_terminal_to_f`.
+Observed preservation returns `v_match/j_match=None`; CSV rows using it omit
+germline loop/partition annotations rather than present observed changes as germline
+support. Resolved CDR3 and complete sequences remain available. Productivity stays
+`not_assessed`. No training/test dataset is automatically rewritten or discarded.
+
 Noncanonical J boundaries are supported through sequence-validated annotations:
 mouse `TRAJ44*01` uses L at position 10, mouse `TRAJ7*01` L at position 9, and
 human `TRAJ61*01` F at position 9 (1-based). `j_anchor_overrides.json` records the

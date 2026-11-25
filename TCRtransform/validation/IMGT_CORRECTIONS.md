@@ -1,5 +1,22 @@
 # IMGT TCR corrections — 2026-11-25
 
+## Allelic anchors and observed-sequence recovery (0.3.0)
+
+Human TRBJ2-7*02 (X02987) has V at zero-based index 5. Its official sequence
+`SYEQYVGPGTRLTVT` and pinned tcrdist endpoint agree; it is now an exact reference.
+J matching filters candidates by the annotated endpoint before uniqueness, fixing
+the repeated F in TRBJ2-1*01. One-residue overlaps still require `min_overlap=1`.
+
+Tests include the reported `CASSRLGGTYEQYV`, `CASSQGSSGRRAF`, restricted Y/F and
+C/F edits, evidence-required missing-C completion, and germline TRBV12-2*01
+position 52 stop versus observed R. Synthetic observed sequences exercise the
+recovery constraints; these are not claims of having rerun the user's dataset rows.
+Observations inconsistent with the V framework/J tail or requested CDR3 are
+rejected without deleting their CSV rows. Explicit terminal edits conflicting
+with observations are rejected. Full observed sequences are retained exactly as
+normalized residues; variable observations gain only the documented bridge/constant.
+No nucleotide productivity assessment or training/test regeneration is performed.
+
 ## Noncanonical J boundary fix
 
 The `[FWC]XXG` heuristic missed mouse TRAJ44 (L, zero-based index 9), mouse

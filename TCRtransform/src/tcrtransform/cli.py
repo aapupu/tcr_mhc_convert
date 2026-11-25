@@ -79,6 +79,7 @@ BUILD_COLUMNS = [
     "TCRa_reference_resolution", "TCRb_reference_resolution",
     "TCRa_reference_warnings", "TCRb_reference_warnings",
     "TCRa_productivity_status", "TCRb_productivity_status",
+    "TCRa_input_cdr3", "TCRb_input_cdr3", "TCRa_sequence_source", "TCRb_sequence_source",
     "tcrtransform_status",
 ]
 PARSE_COLUMNS = [
@@ -256,6 +257,8 @@ def _annotation_processor(
     *,
     include_full_sequences: bool,
 ) -> Callable[[dict[str, str]], dict[str, object]]:
+    if include_full_sequences and args.prefer_observed and not (args.observed_alpha_column or args.observed_beta_column):
+        raise TCRTransformError('--prefer-observed requires an observed alpha or beta column')
     columns = {
         key: _resolve_column(
             header,
@@ -275,23 +278,35 @@ def _annotation_processor(
         species, reference = runtime.get(
             _species_for_row(row, args.species, species_column)
         )
-        values, _, _ = _region_output(
-            species=species,
-            runtime=runtime,
-            reference=reference,
-            trav=row[columns["trav"]],
-            traj=row[columns["traj"]],
-            cdr3a=row[columns["cdr3a"]],
-            trbv=row[columns["trbv"]],
-            trbj=row[columns["trbj"]],
-            cdr3b=row[columns["cdr3b"]],
-            min_overlap=args.min_overlap,
-            max_overlap=args.max_overlap,
-            v_terminal_window=args.v_terminal_window,
-            j_start_window=args.j_start_window,
-        )
+        def annotate(cdr3a, cdr3b):
+            return _region_output(
+                species=species,
+                runtime=runtime,
+                reference=reference,
+                trav=row[columns["trav"]],
+                traj=row[columns["traj"]],
+                cdr3a=cdr3a,
+                trbv=row[columns["trbv"]],
+                trbj=row[columns["trbj"]],
+                cdr3b=cdr3b,
+                min_overlap=args.min_overlap,
+                max_overlap=args.max_overlap,
+                v_terminal_window=args.v_terminal_window,
+                j_start_window=args.j_start_window,
+            )
+        values = {} if include_full_sequences else annotate(row[columns['cdr3a']], row[columns['cdr3b']])[0]
         if include_full_sequences:
+            def evidence(letter):
+                column = getattr(args, f'observed_{letter}_column')
+                if column and column not in row:
+                    raise TCRTransformError(f'observed sequence column missing: {column}')
+                return dict(observed_sequence=row.get(column) if column else None,
+                    observed_kind=args.observed_kind,
+                    prefer_observed=args.prefer_observed and bool(column),
+                    complete_cdr3_from_observed=args.complete_cdr3_from_observed,
+                    correct_terminal_to_f=args.correct_terminal_to_f)
             alpha = reconstruct_tcr_chain(
+                **evidence('alpha'),
                 cdr3=row[columns["cdr3a"]],
                 v_gene=row[columns["trav"]],
                 j_gene=row[columns["traj"]],
@@ -305,6 +320,7 @@ def _annotation_processor(
                 j_start_window=args.j_start_window,
             )
             beta = reconstruct_tcr_chain(
+                **evidence('beta'),
                 cdr3=row[columns["cdr3b"]],
                 v_gene=row[columns["trbv"]],
                 j_gene=row[columns["trbj"]],
@@ -317,6 +333,13 @@ def _annotation_processor(
                 v_terminal_window=args.v_terminal_window,
                 j_start_window=args.j_start_window,
             )
+            observed_used = alpha.sequence_source.startswith('observed') or beta.sequence_source.startswith('observed')
+            if observed_used:
+                # Do not label observed mutations as germline-supported loops.
+                values = {column: '' for column in REGION_COLUMNS}
+                values.update(tcr_species=species, CDR3a=alpha.cdr3, CDR3b=beta.cdr3)
+            else:
+                values = annotate(alpha.cdr3, beta.cdr3)[0]
             values.update(
                 {
                     "TCRa": alpha.sequence,
@@ -327,7 +350,15 @@ def _annotation_processor(
                     "TCRb_reference_warnings": beta.reference_warnings,
                     "TCRa_productivity_status": alpha.productivity_status,
                     "TCRb_productivity_status": beta.productivity_status,
-                    "tcrtransform_status": "ok",
+                    "TCRa_input_cdr3": alpha.input_cdr3,
+                    "TCRb_input_cdr3": beta.input_cdr3,
+                    "TCRa_sequence_source": alpha.sequence_source,
+                    "TCRb_sequence_source": beta.sequence_source,
+                    "tcrtransform_status": (
+                        "warning: observed sequence preserved; germline region annotations omitted" if observed_used
+                        else "warning: CDR3 corrected; inspect input and resolved sequences"
+                        if alpha.input_cdr3 != alpha.cdr3 or beta.input_cdr3 != beta.cdr3 else "ok"
+                    ),
                 }
             )
         return values
@@ -528,6 +559,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_common_csv_options(build)
     _add_gene_input_options(build)
+    build.add_argument('--observed-alpha-column')
+    build.add_argument('--observed-beta-column')
+    build.add_argument('--observed-kind', choices=('full', 'variable'), default='full')
+    build.add_argument('--prefer-observed', action='store_true')
+    build.add_argument('--complete-cdr3-from-observed', action='store_true')
+    build.add_argument('--correct-terminal-to-f', action='store_true')
 
     annotate = subparsers.add_parser(
         "annotate", help="Append CDR1/2/2.5 and CDR3 V/non-VJ/J regions."
