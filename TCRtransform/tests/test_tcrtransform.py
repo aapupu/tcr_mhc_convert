@@ -12,7 +12,7 @@ from tcrtransform.junctions import (
     match_j_terminal,
     match_v_terminal,
 )
-from tcrtransform.references import VGeneLoopReference, load_gene_sequences
+from tcrtransform.references import VGeneLoopReference, load_gene_sequences, get_gene_sequence
 from tcrtransform.regions import define_cdr3_boundary
 from tcrtransform.reverse import SpeciesReference, parse_chain
 from tcrtransform.transform import reconstruct_tcr_chain
@@ -35,9 +35,65 @@ class ReferenceTests(unittest.TestCase):
             ("SGHSN", "HYEKVE", "FDDYH"),
         )
 
-    def test_unknown_explicit_allele_is_not_silently_replaced(self) -> None:
+    def test_unknown_explicit_allele_falls_back_to_gene(self) -> None:
+        self.assertEqual(self.loops.resolve("human", "A", "TRAV1-1*99"),
+                         self.loops.resolve("human", "A", "TRAV1-1"))
         with self.assertRaises(ValueError):
-            self.loops.resolve("human", "A", "TRAV1-1*99")
+            self.loops.resolve("human", "A", "TRAV999*01")
+
+    def test_traj24_alleles_and_fallback(self) -> None:
+        genes = load_gene_sequences("human")
+        expected = {"01": "TTDSWGKFEFGAGTQVVVTP", "02": "TTDSWGKLQFGAGTQVVVTP",
+                    "03": "TTDSWGKFQFGAGTQVVVTP"}
+        for allele, sequence in expected.items():
+            self.assertEqual(get_gene_sequence(genes, "TRAJ24*" + allele), sequence)
+            cdr3 = "CAVR" + sequence[:sequence.rfind("FGAG") + 1]
+            result = reconstruct_tcr_chain(cdr3=cdr3, v_gene="TRAV1-1*01",
+                j_gene="TRAJ24*" + allele, chain="A", species="human")
+            self.assertIn("J:exact(TRAJ24*" + allele + ")", result.reference_resolution)
+            self.assertIn(sequence + "D", result.sequence)
+        self.assertEqual(get_gene_sequence(genes, "TRAJ24"), expected["02"])
+        self.assertEqual(get_gene_sequence(genes, "TRAJ24*99"), expected["02"])
+        result = reconstruct_tcr_chain(cdr3="CAVRTTDSWGKLQF", v_gene="TRAV1-1*99",
+            j_gene="TRAJ24*99", chain="A", species="human")
+        self.assertIn("V:gene_level_fallback(TRAV1-1)", result.reference_resolution)
+        self.assertIn("J:gene_level_fallback(TRAJ24)", result.reference_resolution)
+
+    def test_mouse_corrections_aliases_and_nonfunctional_guards(self) -> None:
+        genes = load_gene_sequences("mouse")
+        self.assertTrue(genes["TRAV13D-1"].endswith("CAME"))
+        self.assertIn("TVWEGGTTVLTCS", genes["TRAV14-1"])
+        self.assertIn("TVWEGETAILNCS", genes["TRAV14D-1"])
+        mouse_loops = self.loops.resolve("mouse", "A", "TRAV14-1*01")
+        self.assertEqual(mouse_loops.cdr2, "ILSVSDK")
+        self.assertEqual(genes["TRAJ49"], "NTGYQNFYFGKGTSLTVIP")
+        self.assertEqual(get_gene_sequence(genes, "TRAV4-4-DV10*01"),
+                         get_gene_sequence(genes, "TRAV4-4/DV10*01"))
+        human = load_gene_sequences("human")
+        for gene in ["TRAJ51", "TRAJ55", "TRAJ58", "TRAJ60", "TRBV12-1*01"]:
+            with self.assertRaisesRegex(ValueError, "nonfunctional"):
+                get_gene_sequence(human, gene)
+        with self.assertRaises(ValueError):
+            get_gene_sequence(genes, "TRBV12-2+TRBV13-2")
+        # An incomplete functional allele is unavailable for full reconstruction.
+        self.assertEqual(get_gene_sequence(genes, "TRAV8-1*02"), genes["TRAV8-1"])
+        self.assertEqual(self.loops.resolve("mouse", "A", "TRAV8-1*02"),
+                         self.loops.resolve("mouse", "A", "TRAV8-1"))
+
+    def test_custom_reference_keeps_exact_then_gene_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "genes.csv"
+            path.write_text("gene_name,amino_acid\nTRAVX,ACDE\nTRAVX*02,ACDF\n")
+            genes = load_gene_sequences("human", path=path)
+            self.assertEqual(get_gene_sequence(genes, "TRAVX*02"), "ACDF")
+            self.assertEqual(get_gene_sequence(genes, "TRAVX*03"), "ACDE")
+            self.assertEqual(get_gene_sequence(genes, "TRAVX"), "ACDE")
+            self.assertNotIn("TRAV1-1", genes)
+
+    def test_overlapping_j_motifs_use_the_conserved_downstream_anchor(self) -> None:
+        junctions = load_junction_reference("human")
+        self.assertEqual(junctions["TRAJ14*01"].cdr3_anchor_index, 6)  # IYSTFIFGSG...
+        self.assertEqual(junctions["TRAJ21*01"].cdr3_anchor_index, 7)  # YNFNKFYFGSG...
 
 
 class BoundaryTests(unittest.TestCase):
@@ -196,7 +252,8 @@ class RoundTripTests(unittest.TestCase):
             self.assertEqual(row["tcrtransform_status"], "ok")
             self.assertIn(row["CDR3a"], row["TCRa"])
             self.assertIn(row["CDR3b"], row["TCRb"])
-            self.assertIn("gene_level_fallback", row["TCRa_reference_resolution"])
+            self.assertIn("V:exact(TRAV14D-1*01)", row["TCRa_reference_resolution"])
+            self.assertIn("J:exact(TRAJ33*01)", row["TCRa_reference_resolution"])
             self.assertEqual(
                 len(row["CDR3a_fixed_mask"]), len(row["CDR3a"])
             )

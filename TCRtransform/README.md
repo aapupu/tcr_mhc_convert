@@ -18,7 +18,7 @@ The package uses only the Python standard library and supports Python 3.9 or new
 
 ### CDR1, CDR2, and CDR2.5
 
-CDR1, CDR2, and CDR2.5 are obtained from the bundled tcrdist3-aligned reference. CDR2.5 corresponds to the pMHC-facing/HV4 loop used by tcrdist3; it is not an additional classical IMGT CDR.
+CDR1, CDR2, and CDR2.5 are obtained from the bundled official IMGT V/J snapshot, using tcrdist-compatible alignment columns (including the extra mouse TRA columns). The same resolved allele supplies reconstruction, loops, and junction metadata. CDR2.5 corresponds to the pMHC-facing/HV4 loop used by tcrdist3; it is not an additional classical IMGT CDR.
 
 ### CDR3
 
@@ -161,8 +161,9 @@ print(parsed.v_genes, parsed.j_genes, parsed.cdr3)
 ## Reference data and scope
 
 - Supported species: `Homo sapiens` and `Mus musculus`.
-- The default reconstruction references are canonical, gene-level V/J/C amino-acid sequences and are suitable for common 10x gene-level V/J annotations. These inputs cannot recover unreported individual allele polymorphisms.
-- If an explicit allele is supplied, CDR1/2/2.5 annotation uses that allele. Full-chain reconstruction falls back to the same gene-level reference when no allele-level sequence is bundled, and reports this in `TCR*_reference_resolution`. Faithful cloning should use measured full-length sequences or a custom allele-level reference.
+- Available V/J alleles (`*01`, `*02`, `*03`, and other supported suffixes) take priority. A missing suffix uses the gene representative; an unknown or incomplete functional allele falls back to that same representative. If the gene is absent too, conversion fails. `TCR*_reference_resolution` reports `exact`, `gene_level`, or `gene_level_fallback` separately for V/J/C. C references remain gene-level.
+- Known P/ORF or stop-bearing references are rejected for functional-chain reconstruction, rather than silently deleting stop codons or replacing an explicitly requested nonfunctional allele. Raw records and their IMGT functionality are retained for provenance. `(F)` and `[F]` are retained as functional annotations with their original qualifiers.
+- The official snapshot contains 870 human/mouse V/J records; 684 complete, functional, standard-amino-acid records are enabled (human: 263 V + 76 J; mouse: 277 V + 68 J). Gene-level representatives cover 158 human and 185 mouse V/J genes. Gene-level input cannot recover unreported individual polymorphisms; faithful cloning requires measured sequences or a custom reference.
 - The bundled constant sequences are extracellular structural domains for model input. They do not include leaders, transmembrane segments, or cytoplasmic tails. Therefore, "complete chain" in this project means a model-ready extracellular chain, not a complete expression-vector CDS.
 - Reverse parsing retains tied V/J genes separated by `|` when protein evidence cannot distinguish them. It does not invent allele resolution that is absent from the sequence.
 - Gamma/delta TCRs are not supported.
@@ -175,7 +176,9 @@ Method and definition references:
 
 Snapshot versions, commits, checksums, and redistribution notes are documented in `src/tcrtransform/data/README.md` and `NOTICE.md`.
 
-`tools/build_mouse_reference.py` and `tools/build_junction_reference.py` regenerate the mouse gene-level reference and the human/mouse junction metadata from the pinned tcrdist snapshot. Both tools have been verified to reproduce the bundled files byte for byte. Install the package first or set `PYTHONPATH=src` before running them.
+`python tools/build_imgt_reference.py` refreshes the official IMGT snapshot and derived gene/junction tables. `--from-bundled` rebuilds derived tables offline. The older `build_mouse_reference.py` and `build_junction_reference.py` scripts describe the historical tcrdist-based build; do not use them to overwrite the corrected defaults. Source URLs, accessions, functionality and download hashes are retained in the data directory.
+
+For example, human `TRAJ24*01` → `TTDSWGKFEFGAGTQVVVTP`, `TRAJ24*02` → `TTDSWGKLQFGAGTQVVVTP`, and `TRAJ24*03` → `TTDSWGKFQFGAGTQVVVTP`. Both `TRAJ24` and unavailable `TRAJ24*99` use the `*02` gene representative. The former erroneous sequence `TTDSWGKLQFEFGAGTQVVVTP` is no longer used. Mouse `TRAV14-1`/`TRAV14D-1`, `TRAV13D-1`, and J-region corrections are documented in the [correction report](validation/IMGT_CORRECTIONS.md).
 
 ## Tests
 

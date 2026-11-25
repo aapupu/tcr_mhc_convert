@@ -18,6 +18,7 @@ from .junctions import (
 from .references import (
     DEFAULT_JUNCTION_REFERENCE,
     choose_trbc_gene,
+    check_gene_usable,
     clean_sequence,
     load_gene_sequences,
     normalize_gene,
@@ -88,8 +89,11 @@ def _resolve_sequence_with_key(
     gene_sequences: dict[str, str],
     gene_name: str,
 ) -> tuple[str, str, str]:
+    check_gene_usable(gene_sequences, gene_name)
+    check_gene_usable(gene_sequences, gene_name.split("*", 1)[0])
     if gene_name in gene_sequences:
-        return gene_name, gene_sequences[gene_name], "exact"
+        mode = "exact" if "*" in gene_name else "gene_level"
+        return gene_name, gene_sequences[gene_name], mode
     base = gene_name.split("*", 1)[0]
     if base in gene_sequences:
         mode = "gene_level_fallback" if base != gene_name else "exact"

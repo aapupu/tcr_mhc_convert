@@ -1,37 +1,6 @@
 {
-  "coordinate_system": "cdr3_anchor_index is zero-based in amino_acid_original",
-  "gene_references": {
-    "human": {
-      "file": "tcr_gene_aa_human_TRA_TRB_gene.csv",
-      "sha256": "5f265101426753da8818d4b2a3f729f960476a7178a19703d8b57bf7741d502c"
-    },
-    "mouse": {
-      "file": "tcr_gene_aa_mouse_TRA_TRB_gene.csv",
-      "sha256": "4319446f30c28694c8e777e114640a8ee0905968acb1c79d59d65e0eb4730a05"
-    }
-  },
-  "rows": 397,
-  "tcrdist_reference": "combo_xcr_2024-03-05.tsv",
-  "tcrdist_reference_sha256": "1d7fcac37ad6d955b3a3f693526e36623186464aef2c528cf8e0322dc89706cd",
-  "traj_trac_split_codon_rule": "Translate the final in-frame TRAJ nucleotide together with the first two TRAC exon nucleotides (human AT; mouse AC).",
-  "unsupported_cdr3_anchors": {
-    "human": [
-      "TRBV17",
-      "TRBV26"
-    ],
-    "mouse": [
-      "TRBV10"
-    ]
-  },
-  "unsupported_traj_bridges": {
-    "human": [],
-    "mouse": [
-      "TRAJ3",
-      "TRAJ4",
-      "TRAJ20",
-      "TRAJ41",
-      "TRAJ46",
-      "TRAJ59"
-    ]
-  }
+  "source": "imgt_tcr_alleles.csv",
+  "source_metadata": "imgt_tcr_alleles.metadata.json",
+  "generated_by": "tools/build_imgt_reference.py",
+  "note": "Canonical gene rows; allele-specific junctions are loaded from the official allele table at runtime."
 }

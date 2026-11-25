@@ -77,6 +77,8 @@ tcrtransform build TCRtransform/examples/tcr_input.csv \
 
 Use `tcrtransform annotate` to annotate CDR regions without reconstruction, or `tcrtransform parse` to infer V/J/C genes and CDRs from existing extracellular chains. See the [`TCRtransform` documentation](TCRtransform/README.md) and its [Stitchr/tcrdist3 comparative validation](TCRtransform/validation/REPORT.md).
 
+TCR V/J lookup now uses an official IMGT snapshot: available alleles are used exactly; a missing allele suffix or unavailable functional allele uses the gene-level representative. Reconstruction and CDR annotation share this choice. The [correction report](TCRtransform/validation/IMGT_CORRECTIONS.md) documents the TRAJ24 and mouse gene fixes.
+
 ## AlphaFold 3 pMHC-TCR five-chain input
 
 Provide each molecule as an independent protein entity. Do not join chains with artificial linkers, and never use a non-contiguous 34-aa pseudosequence as a structural chain.

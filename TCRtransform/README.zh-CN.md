@@ -18,7 +18,7 @@
 
 ### CDR1、CDR2 和 CDR2.5
 
-CDR1、CDR2、CDR2.5 来自打包的 tcrdist3 对齐参考。CDR2.5 是 tcrdist3 所称的 pMHC-facing loop/HV4 区域，并不是额外的一条经典 IMGT CDR。
+CDR1、CDR2、CDR2.5 来自打包的 IMGT 官方 V/J 快照，使用与 tcrdist 兼容的对齐列（包括小鼠 TRA 的额外列）。完整链、CDR 和 junction 元数据使用同一次解析得到的等位基因。CDR2.5 是 tcrdist3 所称的 pMHC-facing loop/HV4 区域，并不是额外的一条经典 IMGT CDR。
 
 ### CDR3
 
@@ -161,8 +161,9 @@ print(parsed.v_genes, parsed.j_genes, parsed.cdr3)
 ## 参考数据与适用范围
 
 - 支持物种：`Homo sapiens` 和 `Mus musculus`。
-- 默认重建参考是基因级 canonical V/J/C 氨基酸序列，适合常见 10x gene-level V/J 注释。仅凭这些输入无法恢复个体未记录的等位基因多态性。
-- 显式提供等位基因时，CDR1/2/2.5 查询会使用该等位基因；完整链重建若没有等位基因级序列则回退到同名基因级参考。需要忠实克隆时应提供实测全长序列或自定义等位基因参考。
+- 优先使用已收录的 V/J 等位基因（`*01`、`*02`、`*03` 及其他可用编号）。未提供编号时使用 gene-level 代表序列；编号未收录或功能性等位基因序列不完整时，回退到同一 gene-level 代表。基因也不存在则报错。`TCR*_reference_resolution` 按 V/J/C 分别标记 `exact`、`gene_level`、`gene_level_fallback`。C 区仍使用 gene-level 参考。
+- 已知 P/ORF 或含终止密码子的参考不用于功能链重建，不会删除终止符，也不会把明确指定的非功能等位基因偷偷替换。原始序列与功能性注释保留以供溯源；`(F)`、`[F]` 保留原始限定并作为功能性注释处理。
+- 官方快照包含人/鼠 V/J 共 870 条记录，其中 684 条完整、功能性且仅含标准氨基酸的记录可用（人：263 V + 76 J；鼠：277 V + 68 J）。gene-level 覆盖人 158、鼠 185 个 V/J 基因。gene-level 输入不能恢复未提供的个体多态性；忠实克隆需要实测序列或自定义参考。
 - 默认常数区为结构预测用胞外结构域，不包含 leader、跨膜区和胞内尾。因此这里的“完整链”指本项目的结构模型输入链，不等同于完整表达载体 CDS。
 - 反向解析保留蛋白序列无法区分的并列 V/J 基因，并用 `|` 连接，不会任意挑选一个。
 - 不支持 γδ TCR。
@@ -175,7 +176,9 @@ print(parsed.v_genes, parsed.j_genes, parsed.cdr3)
 
 数据快照、commit 和校验值见 `src/tcrtransform/data/README.md` 与 `NOTICE.md`。
 
-`tools/build_mouse_reference.py` 和 `tools/build_junction_reference.py` 可从固定的 tcrdist 快照重新生成小鼠 gene-level 参考及人/鼠 junction 元数据。两者已验证可逐字节复现当前打包文件。运行时请先安装本包，或设置 `PYTHONPATH=src`。
+`python tools/build_imgt_reference.py` 从 IMGT 官方更新快照及派生的 gene/junction 表；加 `--from-bundled` 可离线重建。旧的 `build_mouse_reference.py` 和 `build_junction_reference.py` 仅代表历史 tcrdist 构建流程，不应用于覆盖已修正的默认参考。数据目录保留来源 URL、accession、功能性及下载哈希。
+
+例如人 `TRAJ24*01` → `TTDSWGKFEFGAGTQVVVTP`，`TRAJ24*02` → `TTDSWGKLQFGAGTQVVVTP`，`TRAJ24*03` → `TTDSWGKFQFGAGTQVVVTP`。`TRAJ24` 与未收录的 `TRAJ24*99` 均使用 `*02` gene-level 代表。原错误序列 `TTDSWGKLQFEFGAGTQVVVTP` 已停用。小鼠 `TRAV14-1`/`TRAV14D-1`、`TRAV13D-1` 及 J 区修正见[修正报告](validation/IMGT_CORRECTIONS.md)。
 
 ## 测试
 

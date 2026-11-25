@@ -14,9 +14,9 @@ The underlying germline annotations originate from IMGT. Academic use should cit
 
 ## Derived references
 
-- `tcr_gene_aa_human_TRA_TRB_gene.csv`: gene-level human TRA/TRB V/J/C amino-acid reference inherited from the predecessor `tcr_design` project. SHA-256: `5f265101426753da8818d4b2a3f729f960476a7178a19703d8b57bf7741d502c`.
-- `tcr_gene_aa_mouse_TRA_TRB_gene.csv`: gene-level mouse reference derived from the pinned tcrdist3 snapshot plus model-ready constant-region sequences. SHA-256: `4319446f30c28694c8e777e114640a8ee0905968acb1c79d59d65e0eb4730a05`. Provenance is recorded in its adjacent metadata JSON.
-- `tcr_gene_junction_reference.csv`: zero-based V/J CDR3 anchors and TRAJ–TRAC split-codon bridge residues derived from the pinned tcrdist3 snapshot. SHA-256: `f2903e8d4098aa2d857a15bd1f913a3514940e3ee1b57958a583dc0c6f70c02e`. Provenance and unsupported records are recorded in the adjacent metadata JSON.
+- `imgt_tcr_alleles.csv`: official IMGT human/mouse TRAV, TRAJ, TRBV and TRBJ reference directory snapshot, retrieved 2026-11-25. Accessions and original functionality are retained per row; source URLs and download SHA-256 values are in `imgt_tcr_alleles.metadata.json`. Source: [IMGT reference sequences](https://www.imgt.org/vquest/refseqh.html).
+- `tcr_gene_aa_human_TRA_TRB_gene.csv` and `tcr_gene_aa_mouse_TRA_TRB_gene.csv`: inherited gene tables corrected against that snapshot, with explicit representative alleles and disabled nonfunctional records. Adjacent metadata files record current checksums and selections. Model-ready constant sequences are inherited unchanged.
+- `tcr_gene_junction_reference.csv`: zero-based V/J CDR3 anchors and TRAJ–TRAC split-codon bridge residues derived from the official snapshot. Runtime also reads allele-specific junctions from the allele table. Adjacent metadata records the source.
 
 ## Method references
 

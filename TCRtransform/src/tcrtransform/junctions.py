@@ -8,7 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .errors import TCRReferenceError
-from .references import AA20, DEFAULT_JUNCTION_REFERENCE, normalize_species
+from .references import (AA20, DEFAULT_JUNCTION_REFERENCE, normalize_species,
+                         normalize_gene, imgt_records, imgt_representatives)
 
 
 @dataclass(frozen=True)
@@ -33,7 +34,7 @@ class TerminalMatch:
 
 
 def normalize_gene_name(value: object) -> str:
-    return re.sub(r"\s+", "", str(value).strip().upper())
+    return normalize_gene(value)
 
 
 def load_junction_reference(
@@ -43,6 +44,15 @@ def load_junction_reference(
     species = normalize_species(species)
     path = Path(path)
     records: dict[str, JunctionMetadata] = {}
+    if path.resolve() == DEFAULT_JUNCTION_REFERENCE.resolve():
+        rows = {normalize_gene(row["allele"]): row for row in imgt_records(species)
+                if row["usable"] == "true"}
+        rows.update(imgt_representatives(species))
+        for name, row in rows.items():
+            records[name] = JunctionMetadata(species, name, normalize_gene(row["allele"]),
+                row["region"], row["cdr3_anchor"], int(row["cdr3_anchor_index"]),
+                row["jc_bridge"], row["jc_bridge_codon"])
+        return records
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
         required = {

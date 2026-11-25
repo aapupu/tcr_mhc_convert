@@ -344,16 +344,20 @@ def parse_chain(
         cdr3, chain, v_candidates, j_candidates, reference
     )
     status_parts = []
-    if len(v_candidates) > 1:
+    # Score all available alleles, but report gene-level ambiguity: synonymous
+    # proteins and the canonical alias must not create spurious extra genes.
+    v_genes = sorted({item.gene.split("*", 1)[0] for item in v_candidates})
+    j_genes = sorted({item.gene.split("*", 1)[0] for item in j_candidates})
+    if len(v_genes) > 1:
         status_parts.append("ambiguous_v")
-    if len(j_candidates) > 1:
+    if len(j_genes) > 1:
         status_parts.append("ambiguous_j")
     status = "+".join(status_parts) if status_parts else "ok"
     return ChainAnnotation(
         species=reference.species,
         chain=chain,
-        v_genes="|".join(item.gene for item in v_candidates),
-        j_genes="|".join(item.gene for item in j_candidates),
+        v_genes="|".join(v_genes),
+        j_genes="|".join(j_genes),
         constant_genes="|".join(
             sorted({item.constant_gene for item in j_candidates})
         ),

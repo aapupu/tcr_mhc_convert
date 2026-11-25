@@ -77,6 +77,8 @@ tcrtransform build TCRtransform/examples/tcr_input.csv \
 
 只注释 CDR 区域可用 `tcrtransform annotate`；从已有完整胞外链反查 V/J/C 和 CDR 可用 `tcrtransform parse`。详细说明见 [`TCRtransform/README.zh-CN.md`](TCRtransform/README.zh-CN.md)，对照 Stitchr/tcrdist3 的验证见 [`TCRtransform/validation/REPORT.md`](TCRtransform/validation/REPORT.md)。
 
+TCR V/J 查询现使用 IMGT 官方快照：有可用等位基因时精确使用；未提供等位基因编号或功能性等位基因不可用时，使用 gene-level 代表序列。完整链与 CDR 注释保持一致。[修正报告](TCRtransform/validation/IMGT_CORRECTIONS.md)记录了 TRAJ24 和小鼠基因修正。
+
 ## AlphaFold 3 的 pMHC-TCR 五链输入
 
 建议把每条分子作为独立 protein entity 输入，不拼接 linker，也不要把 34-aa pseudo 当作结构链：

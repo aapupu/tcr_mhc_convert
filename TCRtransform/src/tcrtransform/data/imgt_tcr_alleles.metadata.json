@@ -1,0 +1,43 @@
+{
+  "retrieved_on": "2026-11-25",
+  "sources": [
+    {
+      "url": "https://www.imgt.org/download/V-QUEST/IMGT_V-QUEST_reference_directory/Homo_sapiens/TR/TRAV.fasta",
+      "sha256": "948eaea3ad9723a1fa841416b27e04f6742877e633c0ecbeab8dd0a8a57fd95e"
+    },
+    {
+      "url": "https://www.imgt.org/download/V-QUEST/IMGT_V-QUEST_reference_directory/Homo_sapiens/TR/TRAJ.fasta",
+      "sha256": "b48e8adbcb5c73b4f52ac5879575e82d6924d15c6f2aeb81d99163b2f95b20db"
+    },
+    {
+      "url": "https://www.imgt.org/download/V-QUEST/IMGT_V-QUEST_reference_directory/Homo_sapiens/TR/TRBV.fasta",
+      "sha256": "2e5419c00898f403be31ad67d0c6ee17b3d9f259b49f57fee20efb78cc23a74a"
+    },
+    {
+      "url": "https://www.imgt.org/download/V-QUEST/IMGT_V-QUEST_reference_directory/Homo_sapiens/TR/TRBJ.fasta",
+      "sha256": "7dd9f95f184952aca7fa50bf60770331f5d40ef68257d5caf51c4f5195c08edc"
+    },
+    {
+      "url": "https://www.imgt.org/download/V-QUEST/IMGT_V-QUEST_reference_directory/Mus_musculus/TR/TRAV.fasta",
+      "sha256": "aa65e66c0e1fa764443ea7a8dd00033a8dd84b6e5c7e7d50d2288421da1b9324"
+    },
+    {
+      "url": "https://www.imgt.org/download/V-QUEST/IMGT_V-QUEST_reference_directory/Mus_musculus/TR/TRAJ.fasta",
+      "sha256": "039b58c75a693f5db2aa7fbfb4687400f27a7d66d5910b2dfe6e9db53809985a"
+    },
+    {
+      "url": "https://www.imgt.org/download/V-QUEST/IMGT_V-QUEST_reference_directory/Mus_musculus/TR/TRBV.fasta",
+      "sha256": "593f742e79beff3d7db9bd80297a7c56a07a4291512dbf3bf73541db3c2c9c7d"
+    },
+    {
+      "url": "https://www.imgt.org/download/V-QUEST/IMGT_V-QUEST_reference_directory/Mus_musculus/TR/TRBJ.fasta",
+      "sha256": "ce2cbf1bca98fd6c44bdc1c1fef6f9b4017af6deabe3f02751020217f9cea1e5"
+    }
+  ],
+  "policy": "Exact supported allele first; missing or incomplete functional alleles fall back to the gene representative. Known nonfunctional or stop-bearing records are blocked, never substituted.",
+  "gene_policy": "Preserve a functional exact existing representative where possible; otherwise prefer *01 then lowest allele. Human TRAJ24 uses *02; mouse TRAV13D-1, TRAV14-1, TRAV14D-1 and TRAJ49 use corrected *01.",
+  "usability": "F/(F)/[F], standard amino acids, conserved anchor; V must have its N-terminus and at least 80 aa. P/ORF, stop-bearing, ambiguous and partial records retained only for provenance.",
+  "citation": "IMGT, the international ImMunoGeneTics information system; https://www.imgt.org",
+  "records": 870,
+  "usable_records": 684
+}

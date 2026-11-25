@@ -44,9 +44,51 @@ def normalize_species(value: object) -> str:
 
 def normalize_gene(value: object, label: str = "TCR gene") -> str:
     gene = re.sub(r"\s+", "", str(value).strip().upper())
+    gene = gene.replace("-DV", "/DV")
     if not gene:
         raise TCRTransformError(f"{label} is empty")
     return gene
+
+
+def imgt_records(species: object) -> list[dict[str, str]]:
+    """Official raw V/J records, including disabled P/ORF/stop-bearing rows."""
+    species = normalize_species(species)
+    with (DATA_DIR / "imgt_tcr_alleles.csv").open(newline="") as handle:
+        return [row for row in csv.DictReader(handle) if row["species"] == species]
+
+
+def imgt_representatives(species: object) -> dict[str, dict[str, str]]:
+    rows = [row for row in imgt_records(species) if row["usable"] == "true"]
+    exact = {normalize_gene(row["allele"]): row for row in rows}
+    representatives: dict[str, dict[str, str]] = {}
+    for row in sorted(rows, key=lambda r: (not r["allele"].endswith("*01"), _natural_allele_key(r["allele"]))):
+        representatives.setdefault(normalize_gene(row["gene"]), row)
+    with resolve_gene_reference_path(species).open(newline="") as handle:
+        for row in csv.DictReader(handle):
+            allele = normalize_gene(row.get("reference_allele") or "UNSPECIFIED")
+            if allele in exact:
+                representatives[normalize_gene(row["gene_name"])] = exact[allele]
+    return representatives
+
+
+class GeneSequences(dict):
+    """A lookup with explicit rejection of known unusable reference records."""
+
+    def __init__(self):
+        super().__init__()
+        self.blocked: set[str] = set()
+
+
+def _known_nonfunctional(row: dict[str, str]) -> bool:
+    return row.get("functionality", "unavailable").strip("()[]") != "F" or "*" in row.get("sequence", row.get("amino_acid", ""))
+
+
+def check_gene_usable(sequences: dict[str, str], name: str) -> None:
+    if name in getattr(sequences, "blocked", set()):
+        raise TCRReferenceError(
+            f"{name} is a known nonfunctional or stop-bearing reference record; "
+            "cannot reconstruct a functional chain from it"
+        )
 
 
 def clean_sequence(
@@ -89,7 +131,7 @@ def load_gene_sequences(
     sequence_column: str = "amino_acid",
 ) -> dict[str, str]:
     reference_path = resolve_gene_reference_path(species, path)
-    sequences: dict[str, str] = {}
+    sequences = GeneSequences()
     with reference_path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
         required = {"gene_name", sequence_column}
@@ -100,6 +142,10 @@ def load_gene_sequences(
             )
         for row_number, row in enumerate(reader, start=2):
             gene = normalize_gene(row["gene_name"], f"reference row {row_number} gene")
+            if row.get("usable") == "false":
+                if _known_nonfunctional(row):
+                    sequences.blocked.add(gene)
+                continue
             sequence = clean_sequence(
                 row[sequence_column],
                 f"reference row {row_number} {sequence_column}",
@@ -110,6 +156,16 @@ def load_gene_sequences(
                 raise TCRReferenceError(
                     f"conflicting sequences for {gene} in {reference_path}"
                 )
+    if reference_path == resolve_gene_reference_path(species) and sequence_column in {"amino_acid", "amino_acid_original"}:
+        for row in imgt_records(species):
+            allele = normalize_gene(row["allele"])
+            if row["usable"] == "true":
+                sequences[allele] = row["sequence"]
+            elif _known_nonfunctional(row):
+                sequences.blocked.add(allele)
+        for gene, row in imgt_representatives(species).items():
+            sequences[gene] = row["sequence"]
+            sequences.blocked.discard(gene)
     if not sequences:
         raise TCRReferenceError(f"{reference_path} contains no gene sequences")
     return sequences
@@ -117,6 +173,8 @@ def load_gene_sequences(
 
 def get_gene_sequence(gene_sequences: dict[str, str], gene_name: object) -> str:
     name = normalize_gene(gene_name)
+    check_gene_usable(gene_sequences, name)
+    check_gene_usable(gene_sequences, name.split("*", 1)[0])
     return gene_sequences.get(name) or gene_sequences.get(name.split("*", 1)[0], "")
 
 
@@ -200,6 +258,31 @@ class VGeneLoopReference:
         path: str | Path = DEFAULT_TCRDIST_REFERENCE,
     ) -> "VGeneLoopReference":
         path = Path(path)
+        if path.resolve() == DEFAULT_TCRDIST_REFERENCE.resolve():
+            records = []
+            blocked = set()
+            skipped = 0
+            for species in ("human", "mouse"):
+                for row in imgt_records(species):
+                    if row["region"] != "V":
+                        continue
+                    allele = normalize_gene(row["allele"])
+                    chain = "A" if allele.startswith("TRAV") else "B"
+                    if row["usable"] != "true":
+                        skipped += 1
+                        if _known_nonfunctional(row):
+                            blocked.add((species, chain, allele))
+                        continue
+                    records.append(VGeneLoops(species, chain, allele,
+                        normalize_gene(row["gene"]), row["cdr1"], row["cdr2"], row["cdr2_5"], True))
+            result = cls(records, skipped_records=skipped)
+            result.blocked = blocked
+            for species in ("human", "mouse"):
+                for gene, row in imgt_representatives(species).items():
+                    if row["region"] == "V":
+                        chain = "A" if gene.startswith("TRAV") else "B"
+                        result.canonical[species, chain, gene] = result.exact[species, chain, normalize_gene(row["allele"])]
+            return result
         records: list[VGeneLoops] = []
         skipped = 0
         with path.open("r", encoding="utf-8", newline="") as handle:
@@ -260,12 +343,12 @@ class VGeneLoopReference:
                 f"{gene_name!r} is not a {expected} gene for chain {chain}"
             )
         if "*" in gene_name:
+            if (organism, chain, gene_name) in getattr(self, "blocked", set()):
+                raise TCRReferenceError(f"known nonfunctional or stop-bearing IMGT allele {gene_name!r}")
             record = self.exact.get((organism, chain, gene_name))
-            if record is None:
-                raise TCRReferenceError(
-                    f"unrecognized {organism} allele-specific V gene {gene_name!r}"
-                )
-            return record
+            if record is not None:
+                return record
+            gene_name = gene_name.split("*", 1)[0]
         record = self.canonical.get((organism, chain, gene_name))
         if record is None:
             raise TCRReferenceError(f"unrecognized {organism} V gene {gene_name!r}")
