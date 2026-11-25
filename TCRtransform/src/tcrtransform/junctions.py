@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .errors import TCRReferenceError
 from .references import (AA20, DEFAULT_JUNCTION_REFERENCE, normalize_species,
-                         normalize_gene, imgt_records, imgt_representatives)
+                         normalize_gene, imgt_records, imgt_representatives, reconstruction_candidate)
 
 
 @dataclass(frozen=True)
@@ -46,7 +46,7 @@ def load_junction_reference(
     records: dict[str, JunctionMetadata] = {}
     if path.resolve() == DEFAULT_JUNCTION_REFERENCE.resolve():
         rows = {normalize_gene(row["allele"]): row for row in imgt_records(species)
-                if row["usable"] == "true"}
+                if reconstruction_candidate(row)}
         rows.update(imgt_representatives(species))
         for name, row in rows.items():
             records[name] = JunctionMetadata(species, name, normalize_gene(row["allele"]),

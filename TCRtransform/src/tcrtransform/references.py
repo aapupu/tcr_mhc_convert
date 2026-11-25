@@ -58,7 +58,7 @@ def imgt_records(species: object) -> list[dict[str, str]]:
 
 
 def imgt_representatives(species: object) -> dict[str, dict[str, str]]:
-    rows = [row for row in imgt_records(species) if row["usable"] == "true"]
+    rows = [row for row in imgt_records(species) if reconstruction_candidate(row)]
     exact = {normalize_gene(row["allele"]): row for row in rows}
     representatives: dict[str, dict[str, str]] = {}
     for row in sorted(rows, key=lambda r: (not r["allele"].endswith("*01"), _natural_allele_key(r["allele"]))):
@@ -77,6 +77,15 @@ class GeneSequences(dict):
     def __init__(self):
         super().__init__()
         self.blocked: set[str] = set()
+        self.functionality: dict[str, str] = {}
+
+
+def reconstruction_candidate(row: dict[str, str]) -> bool:
+    """Reference geometry only; productivity belongs to the rearranged record."""
+    return (int(row['cdr3_anchor_index']) >= 0
+            and not (set(row['sequence']) - (AA20 | {'*'}))
+            and (row['region'] != 'V' or
+                 (not row['aligned_sequence'].startswith('.') and len(row['sequence']) >= 80)))
 
 
 def _known_nonfunctional(row: dict[str, str]) -> bool:
@@ -86,8 +95,8 @@ def _known_nonfunctional(row: dict[str, str]) -> bool:
 def check_gene_usable(sequences: dict[str, str], name: str) -> None:
     if name in getattr(sequences, "blocked", set()):
         raise TCRReferenceError(
-            f"{name} is a known nonfunctional or stop-bearing reference record; "
-            "cannot reconstruct a functional chain from it"
+            f"{name} has no supported reference geometry; reconstruction unresolved, "
+            "not evidence that the observed rearrangement is unproductive"
         )
 
 
@@ -159,12 +168,13 @@ def load_gene_sequences(
     if reference_path == resolve_gene_reference_path(species) and sequence_column in {"amino_acid", "amino_acid_original"}:
         for row in imgt_records(species):
             allele = normalize_gene(row["allele"])
-            if row["usable"] == "true":
+            if reconstruction_candidate(row):
                 sequences[allele] = row["sequence"]
-            elif _known_nonfunctional(row):
-                sequences.blocked.add(allele)
+                sequences.functionality[allele] = row['functionality']
+                sequences.blocked.discard(allele)
         for gene, row in imgt_representatives(species).items():
             sequences[gene] = row["sequence"]
+            sequences.functionality[gene] = row['functionality']
             sequences.blocked.discard(gene)
     if not sequences:
         raise TCRReferenceError(f"{reference_path} contains no gene sequences")
@@ -268,9 +278,11 @@ class VGeneLoopReference:
                         continue
                     allele = normalize_gene(row["allele"])
                     chain = "A" if allele.startswith("TRAV") else "B"
-                    if row["usable"] != "true":
+                    if not reconstruction_candidate(row) or any(
+                        not row[k] or set(row[k]) - AA20 for k in ('cdr1', 'cdr2', 'cdr2_5')
+                    ):
                         skipped += 1
-                        if _known_nonfunctional(row):
+                        if reconstruction_candidate(row):
                             blocked.add((species, chain, allele))
                         continue
                     records.append(VGeneLoops(species, chain, allele,
@@ -281,7 +293,9 @@ class VGeneLoopReference:
                 for gene, row in imgt_representatives(species).items():
                     if row["region"] == "V":
                         chain = "A" if gene.startswith("TRAV") else "B"
-                        result.canonical[species, chain, gene] = result.exact[species, chain, normalize_gene(row["allele"])]
+                        key = (species, chain, normalize_gene(row["allele"]))
+                        if key in result.exact:
+                            result.canonical[species, chain, gene] = result.exact[key]
             return result
         records: list[VGeneLoops] = []
         skipped = 0
@@ -344,7 +358,7 @@ class VGeneLoopReference:
             )
         if "*" in gene_name:
             if (organism, chain, gene_name) in getattr(self, "blocked", set()):
-                raise TCRReferenceError(f"known nonfunctional or stop-bearing IMGT allele {gene_name!r}")
+                raise TCRReferenceError(f"unresolved CDR loop sequence for {gene_name!r}; review the observed rearrangement")
             record = self.exact.get((organism, chain, gene_name))
             if record is not None:
                 return record

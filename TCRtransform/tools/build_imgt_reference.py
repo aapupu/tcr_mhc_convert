@@ -138,9 +138,9 @@ def main():
     retrieved_on = (json.loads((DATA/'imgt_tcr_alleles.metadata.json').read_text())['retrieved_on']
                     if args.from_bundled else datetime.now(timezone.utc).date().isoformat())
     metadata = dict(retrieved_on=retrieved_on, sources=sources,
-        policy='Exact supported allele first; missing or incomplete functional alleles fall back to the gene representative. Known nonfunctional or stop-bearing records are blocked, never substituted.',
+        policy='Exact supported allele first; missing/incomplete alleles fall back to the gene representative. Runtime assesses geometry and retained stops after junction matching; P/ORF labels alone do not reject rearranged samples.',
         gene_policy='Preserve a functional exact existing representative where possible; otherwise prefer *01 then lowest allele. Human TRAJ24 uses *02; mouse TRAV13D-1, TRAV14-1, TRAV14D-1 and TRAJ49 use corrected *01.',
-        usability='F/(F)/[F], standard amino acids, conserved anchor; V must have its N-terminus and at least 80 aa. P/ORF, stop-bearing, ambiguous and partial records retained only for provenance.',
+        usability='Historical strict subset only: F/(F)/[F], standard amino acids, conserved anchor; V N-terminus and at least 80 aa. Runtime also considers P/ORF and stop-bearing records with supported geometry.',
         citation='IMGT, the international ImMunoGeneTics information system; https://www.imgt.org',
         records=len(rows), usable_records=sum(r['usable']=='true' for r in rows))
     (DATA/'imgt_tcr_alleles.metadata.json').write_text(json.dumps(metadata, indent=2)+'\n')

@@ -42,6 +42,8 @@ class ReconstructedChain:
     j_reference_gene: str
     constant_reference_gene: str
     reference_resolution: str
+    reference_warnings: str = ""
+    productivity_status: str = "not_assessed"
 
 
 @dataclass(frozen=True)
@@ -260,6 +262,24 @@ def reconstruct_tcr_chain(
                 f"no reliable productive TRAJ-TRAC split-codon residue for {j_gene}"
             )
     sequence = append_constant_region(variable_chain, constant_sequence, bridge)
+    if '*' in sequence:
+        stop_positions = [i + 1 for i, aa in enumerate(sequence) if aa == '*']
+        raise TCRTransformError(
+            f"retained_stop_in_reconstruction: stop at inferred chain position(s) {stop_positions} (1-based); "
+            "retain the input record and review its observed rearranged sequence and original "
+            "productive annotation before excluding or regenerating data"
+        )
+    warnings = []
+    for label, key in [('V', v_reference_gene), ('J', j_reference_gene)]:
+        functionality = getattr(genes, 'functionality', {}).get(key, '')
+        if functionality and functionality.strip('()[]') != 'F':
+            warnings.append(f'{label}:{key}:germline_{functionality}:review_observed_rearrangement')
+    if '*' in v_sequence or '*' in j_sequence:
+        warnings.append('germline_stop_removed_by_supported_junction')
+        for label, raw in [('V', v_sequence), ('J', j_sequence)]:
+            positions = [str(i + 1) for i, aa in enumerate(raw) if aa == '*']
+            if positions:
+                warnings.append(f'{label}:removed_stop_reference_positions_1based={",".join(positions)}')
     if cdr3 not in sequence:
         raise TCRTransformError("internal reconstruction error: CDR3 was not retained")
     if not sequence.endswith(constant_sequence):
@@ -278,6 +298,7 @@ def reconstruct_tcr_chain(
         v_reference_gene=v_reference_gene,
         j_reference_gene=j_reference_gene,
         constant_reference_gene=constant_reference_gene,
+        reference_warnings=';'.join(warnings),
         reference_resolution=(
             f"V:{v_resolution}({v_reference_gene});"
             f"J:{j_resolution}({j_reference_gene});"

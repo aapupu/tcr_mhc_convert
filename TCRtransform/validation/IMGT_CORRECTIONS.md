@@ -1,5 +1,27 @@
 # IMGT TCR corrections — 2026-11-25
 
+## Follow-up: rearrangement-aware eligibility
+
+The strict eligibility policy and counts below describe the initial correction
+and are superseded by this section. IMGT explicitly notes that a V-terminal or
+J-initial stop can disappear during rearrangement; germline F/ORF/P and rearranged
+productive/unproductive are different annotations. See the
+[official functionality definitions](https://www.imgt.org/IMGTScientificChart/SequenceDescription/IMGTfunctionality.html).
+
+Runtime now considers references with supported geometry regardless of germline
+functionality, preserving literal stop positions until after junction matching.
+Removed stops are reported; retained stops prevent model-chain output and require
+review of the actual rearrangement. P/ORF warnings do not classify the sample.
+Missing geometry remains unresolved rather than biologically unproductive.
+The raw CSV `usable` column remains the historical strict-snapshot flag.
+
+Examples tested: mouse `TRBV4*01` + `TRBJ1-5*02` + `CASSQPLF` removes both germline
+end stops; human `TRAJ58*01` can lose its leading stop, and `TRAJ1*01` is not
+rejected for ORF alone. Retained internal V or J stops still fail reconstruction.
+All 14 tests pass, including preservation of failed CSV rows and their original
+productive values. New productivity output is explicitly `not_assessed`.
+No training/test records were deleted or regenerated in this correction.
+
 This update fixes TCR V/J references and unifies allele resolution across chain
 reconstruction, CDR loops and junction metadata. It does not modify MHC data or
 rerun the historical Stitchr comparison.

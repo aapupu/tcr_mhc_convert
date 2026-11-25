@@ -5,9 +5,11 @@ The default V/J source is `imgt_tcr_alleles.csv`, downloaded from the official
 The adjacent metadata JSON contains all eight source URLs and their SHA-256
 hashes. Each record retains its accession, functionality, raw translated
 sequence, gapped sequence, and enabled/disabled status. There are 870 records;
-684 are enabled for reconstruction. Missing/incomplete functional alleles fall
-back to the gene representative; known P/ORF and stop-bearing records are
-rejected. The gene tables identify their selected `reference_allele` explicitly.
+684 carry the historical strict `usable` flag. Runtime eligibility now checks
+reference geometry independently of germline functionality and checks stops
+after supported junction trimming. P/ORF are review annotations; retained stops
+cause reconstruction errors, not automatic rejection of the source sample.
+The gene tables identify their selected `reference_allele` explicitly.
 
 CDR columns follow the tcrdist convention. Human TRA/TRB and mouse TRB use
 1-based columns 27–38, 56–65, 81–86 and C anchor 104. Mouse TRA uses columns

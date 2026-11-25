@@ -70,9 +70,8 @@ class ReferenceTests(unittest.TestCase):
         self.assertEqual(get_gene_sequence(genes, "TRAV4-4-DV10*01"),
                          get_gene_sequence(genes, "TRAV4-4/DV10*01"))
         human = load_gene_sequences("human")
-        for gene in ["TRAJ51", "TRAJ55", "TRAJ58", "TRAJ60", "TRBV12-1*01"]:
-            with self.assertRaisesRegex(ValueError, "nonfunctional"):
-                get_gene_sequence(human, gene)
+        for gene in ["TRAJ58", "TRAJ60", "TRBV12-1*01"]:
+            self.assertIn('*', get_gene_sequence(human, gene))
         with self.assertRaises(ValueError):
             get_gene_sequence(genes, "TRBV12-2+TRBV13-2")
         # An incomplete functional allele is unavailable for full reconstruction.
@@ -94,6 +93,37 @@ class ReferenceTests(unittest.TestCase):
         junctions = load_junction_reference("human")
         self.assertEqual(junctions["TRAJ14*01"].cdr3_anchor_index, 6)  # IYSTFIFGSG...
         self.assertEqual(junctions["TRAJ21*01"].cdr3_anchor_index, 7)  # YNFNKFYFGSG...
+
+    def test_rearrangement_removes_terminal_stops_before_validation(self) -> None:
+        result = reconstruct_tcr_chain(species='mouse', chain='B', v_gene='TRBV4*01',
+            j_gene='TRBJ1-5*02', cdr3='CASSQPLF')
+        self.assertNotIn('*', result.sequence)
+        self.assertIn('germline_stop_removed', result.reference_warnings)
+        self.assertIn('V:exact(TRBV4*01)', result.reference_resolution)
+        self.assertIn('J:exact(TRBJ1-5*02)', result.reference_resolution)
+        self.assertEqual(result.productivity_status, 'not_assessed')
+        result = reconstruct_tcr_chain(species='human', chain='A', v_gene='TRAV1-1*01',
+            j_gene='TRAJ58*01', cdr3='CAVRETSGSRLTF')
+        self.assertIn('germline_ORF', result.reference_warnings)
+        self.assertNotIn('*', result.sequence)
+
+    def test_retained_stops_fail_reconstruction_without_classifying_sample(self) -> None:
+        for v, j, cdr3 in [('TRBV12-1*01', 'TRBJ2-7*01', 'CASSFNEQYF')]:
+            with self.assertRaisesRegex(ValueError, 'retained_stop_in_reconstruction'):
+                reconstruct_tcr_chain(species='human', chain='B' if v.startswith('TRB') else 'A',
+                    v_gene=v, j_gene=j, cdr3=cdr3)
+        with self.assertRaisesRegex(ValueError, 'retained_stop_in_reconstruction'):
+            reconstruct_tcr_chain(species='human', chain='B', v_gene='TRBVX',
+                j_gene='TRBJX', cdr3='CASSQYF',
+                gene_sequences={'TRBVX':'AAAACASS', 'TRBJX':'QYFGPG*', 'TRBC1':'AAA'},
+                junctions={'TRBVX':JunctionMetadata('human','TRBVX','TRBVX*01','V','C',4),
+                           'TRBJX':JunctionMetadata('human','TRBJX','TRBJX*01','J','F',2)})
+
+    def test_orf_label_alone_does_not_reject_reconstruction(self) -> None:
+        result = reconstruct_tcr_chain(species='human', chain='A', v_gene='TRAV1-1*01',
+            j_gene='TRAJ1*01', cdr3='CAVRYESITSQLQF')
+        self.assertIn('germline_ORF', result.reference_warnings)
+        self.assertEqual(result.productivity_status, 'not_assessed')
 
 
 class BoundaryTests(unittest.TestCase):
@@ -233,14 +263,16 @@ class RoundTripTests(unittest.TestCase):
             with input_path.open("w", encoding="utf-8", newline="") as handle:
                 writer = csv.writer(handle)
                 writer.writerow(
-                    ["species", "TRAV", "TRAJ", "CDR3A", "TRBV", "TRBJ", "CDR3B"]
+                    ["species", "TRAV", "TRAJ", "CDR3A", "TRBV", "TRBJ", "CDR3B", "productive"]
                 )
                 writer.writerow(
                     [
                         "mouse", "TRAV14D-1*01", "TRAJ33*01", "CAASDNYQLIW",
-                        "TRBV12-1*01", "TRBJ2-7*01", "CASSRANYEQYF",
+                        "TRBV4*01", "TRBJ1-5*02", "CASSQPLF", "True",
                     ]
                 )
+                writer.writerow(['mouse', 'TRAV999*01', 'TRAJ33*01', 'CAASDNYQLIW',
+                                 'TRBV4*01', 'TRBJ1-5*02', 'CASSQPLF', 'True'])
             cli_main(
                 [
                     "build", str(input_path), "-o", str(output_path),
@@ -248,7 +280,13 @@ class RoundTripTests(unittest.TestCase):
                 ]
             )
             with output_path.open("r", encoding="utf-8", newline="") as handle:
-                row = next(csv.DictReader(handle))
+                rows = list(csv.DictReader(handle))
+                row = rows[0]
+            self.assertEqual(len(rows), 2)
+            self.assertEqual([r['productive'] for r in rows], ['True', 'True'])
+            self.assertTrue(rows[1]['tcrtransform_status'].startswith('error:'))
+            self.assertEqual(row['TCRb_productivity_status'], 'not_assessed')
+            self.assertIn('germline_stop_removed', row['TCRb_reference_warnings'])
             self.assertEqual(row["tcrtransform_status"], "ok")
             self.assertIn(row["CDR3a"], row["TCRa"])
             self.assertIn(row["CDR3b"], row["TCRb"])

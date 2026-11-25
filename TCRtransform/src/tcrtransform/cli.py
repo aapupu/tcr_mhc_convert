@@ -77,6 +77,8 @@ BUILD_COLUMNS = [
     *REGION_COLUMNS,
     "TCRa", "TCRb",
     "TCRa_reference_resolution", "TCRb_reference_resolution",
+    "TCRa_reference_warnings", "TCRb_reference_warnings",
+    "TCRa_productivity_status", "TCRb_productivity_status",
     "tcrtransform_status",
 ]
 PARSE_COLUMNS = [
@@ -321,6 +323,10 @@ def _annotation_processor(
                     "TCRb": beta.sequence,
                     "TCRa_reference_resolution": alpha.reference_resolution,
                     "TCRb_reference_resolution": beta.reference_resolution,
+                    "TCRa_reference_warnings": alpha.reference_warnings,
+                    "TCRb_reference_warnings": beta.reference_warnings,
+                    "TCRa_productivity_status": alpha.productivity_status,
+                    "TCRb_productivity_status": beta.productivity_status,
                     "tcrtransform_status": "ok",
                 }
             )
@@ -498,7 +504,7 @@ def _add_common_csv_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--overwrite-columns", action="store_true")
     parser.add_argument("--species", default="human")
     parser.add_argument("--species-column")
-    parser.add_argument("--on-error", choices=("fail", "keep"), default="fail")
+    parser.add_argument("--on-error", choices=("fail", "keep"), default="keep")
 
 
 def _add_gene_input_options(parser: argparse.ArgumentParser) -> None:
